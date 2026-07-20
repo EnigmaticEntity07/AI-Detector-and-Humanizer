@@ -51,9 +51,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-DEFAULT_CSV = "train_v2_drcat_02.csv"
+DEFAULT_CSV = "dataset.csv"
 DEFAULT_SAMPLE = 2000
-DEFAULT_OUTPUT = "ai_detector_model.pkl"
+DEFAULT_OUTPUT = "detector_model.pkl"
 DEFAULT_PRECISION_FLOOR = 0.30   # minimum acceptable precision when tuning
 DEFAULT_TEST_SIZE = 0.20
 RANDOM_STATE = 42

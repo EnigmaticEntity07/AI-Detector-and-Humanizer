@@ -9,11 +9,8 @@ import pandas as pd
 # pyrefly: ignore [missing-import]
 import google.generativeai as genai
 
-# Configure Gemini
-try:
-    api_key = st.secrets["GEMINI_API_KEY"]
-except Exception:
-    api_key = os.environ.get("GEMINI_API_KEY")
+# Configure Gemini strictly from environment for Railway
+api_key = os.environ.get("GEMINI_API_KEY")
 
 if api_key:
     genai.configure(api_key=api_key)
@@ -122,7 +119,7 @@ def analyze_text(text):
 # ---------------------------------------------------------------------------
 # Few-Shot Humanizer – dynamically samples human-written examples each call
 # ---------------------------------------------------------------------------
-DATASET_PATH = os.path.join(os.path.dirname(__file__), "train_v2_drcat_02.csv")
+DATASET_PATH = os.path.join(os.path.dirname(__file__), "dataset.csv")
 
 # Cache the human-only rows in memory so we don't re-read 100 MB on every click
 @st.cache_data(show_spinner=False)
@@ -329,7 +326,12 @@ st.markdown("""
 # ---------------------------------------------------------------------------
 # Import the local classifier
 # ---------------------------------------------------------------------------
-from classifier import predict as classify_text, is_model_available
+from classifier import predict as classify_text, is_model_available, load_bundle
+
+@st.cache_resource
+def get_model_bundle():
+    """Cache the ML model bundle so it doesn't crash the server on reload."""
+    return load_bundle()
 
 # ---------------------------------------------------------------------------
 # Lexicon Swarm — fullscreen Three.js background (InstancedMesh)
@@ -801,7 +803,8 @@ if detect_button:
             with bg_placeholder:
                 render_lexicon_swarm(app_state="ai_detected")
             with st.spinner("Running classifier analysis…"):
-                result = classify_text(text_input)
+                bundle = get_model_bundle()
+                result = classify_text(text_input, bundle=bundle)
             # Keep ai_detected state after analysis so the background
             # visually reflects the detection result while the score is shown
             with bg_placeholder:
@@ -936,7 +939,8 @@ if humanize_button:
             skip_humanize = False
             if is_model_available():
                 with st.spinner("Pre-checking AI detection score…"):
-                    pre_check = classify_text(text_input)
+                    bundle = get_model_bundle()
+                    pre_check = classify_text(text_input, bundle=bundle)
                 pre_prob = pre_check["probability"]
                 if pre_prob <= 0.40:
                     skip_humanize = True

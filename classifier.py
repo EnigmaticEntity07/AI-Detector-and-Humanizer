@@ -33,10 +33,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-DEFAULT_MODEL_PATH = os.path.join(os.path.dirname(__file__), "ai_detector_model.pkl")
-
-# Module-level cache so we only load the bundle once per process
-_bundle_cache: dict | None = None
+DEFAULT_MODEL_PATH = os.path.join(os.path.dirname(__file__), "detector_model.pkl")
 
 
 # ---------------------------------------------------------------------------
@@ -44,27 +41,23 @@ _bundle_cache: dict | None = None
 # ---------------------------------------------------------------------------
 
 def load_bundle(model_path: str = DEFAULT_MODEL_PATH) -> dict:
-    """Load and cache the model bundle from *model_path*.
+    """Load the model bundle from *model_path*.
 
     Returns a dict with keys: model, scaler, imputer, threshold,
     feature_names, include_gemini.
 
     Raises ``FileNotFoundError`` if the .pkl doesn't exist.
     """
-    global _bundle_cache  # noqa: PLW0603
-    if _bundle_cache is not None:
-        return _bundle_cache
-
     if not os.path.isfile(model_path):
         raise FileNotFoundError(
             f"Model bundle not found at '{model_path}'. "
             "Run  python train_model.py  first."
         )
 
-    _bundle_cache = joblib.load(model_path)
+    bundle = joblib.load(model_path)
     logger.info("Loaded model bundle from %s  (threshold=%.4f)",
-                model_path, _bundle_cache["threshold"])
-    return _bundle_cache
+                model_path, bundle["threshold"])
+    return bundle
 
 
 def is_model_available(model_path: str = DEFAULT_MODEL_PATH) -> bool:
@@ -100,7 +93,7 @@ def compute_false_positive_probability(prob_ai: float, bundle: dict) -> float:
 # Prediction
 # ---------------------------------------------------------------------------
 
-def predict(text: str, model_path: str = DEFAULT_MODEL_PATH) -> dict:
+def predict(text: str, model_path: str = DEFAULT_MODEL_PATH, bundle: dict | None = None) -> dict:
     """Classify *text* as human (0) or AI-generated (1).
 
     Returns
@@ -112,7 +105,8 @@ def predict(text: str, model_path: str = DEFAULT_MODEL_PATH) -> dict:
         verdict      : str — human-readable verdict
         features     : dict — raw feature values extracted from the text
     """
-    bundle = load_bundle(model_path)
+    if bundle is None:
+        bundle = load_bundle(model_path)
 
     model = bundle["model"]
     scaler = bundle["scaler"]
