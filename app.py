@@ -259,11 +259,34 @@ st.markdown("""
         font-size: 1rem !important;
         color: #f3f4f6 !important;
         backdrop-filter: blur(8px);
-        transition: border-color 0.3s, box-shadow 0.3s;
+        transition: all 0.3s ease !important;
+    }
+    .stTextArea textarea:hover {
+        border-color: rgba(99, 102, 241, 0.6) !important;
+        background-color: rgba(17, 24, 39, 0.95) !important;
     }
     .stTextArea textarea:focus {
         border-color: #6366f1 !important;
         box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25) !important;
+        background-color: rgba(17, 24, 39, 1.0) !important;
+    }
+
+    /* ── Scrollbar Styling ── */
+    ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+        background: rgba(10, 10, 20, 0.3);
+        border-radius: 8px;
+    }
+    ::-webkit-scrollbar-thumb {
+        background: rgba(99, 102, 241, 0.5);
+        border-radius: 8px;
+        transition: background 0.3s ease;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+        background: rgba(99, 102, 241, 0.8);
     }
 
     /* ── Buttons ── */
@@ -770,24 +793,27 @@ def render_score_visualizer(score_float, prob_pct, verdict):
 st.markdown('<div class="main-title">AI Detector & Humanizer 🤖</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">Analyze your text to check if it was written by AI, or rewrite it to sound more natural.</div>', unsafe_allow_html=True)
 
-visualizer_placeholder = st.empty()
+if "input_text" not in st.session_state:
+    st.session_state.input_text = ""
 
-# Input section
-text_input = st.text_area(
-    "Paste your content here:",
-    height=300,
-    placeholder="Enter the text you want to analyze or humanize...",
-    label_visibility="collapsed"
-)
+col_left, col_right = st.columns(2, gap="large")
 
-# Buttons layout
-col1, col2, col3 = st.columns([1, 1, 2])
+with col_left:
+    # Input section
+    text_input = st.text_area(
+        "Paste your content here:",
+        height=400,
+        placeholder="Enter the text you want to analyze or humanize...",
+        label_visibility="collapsed",
+        key="input_text"
+    )
 
-with col1:
-    detect_button = st.button("🔍 Detect AI", use_container_width=True)
-
-with col2:
-    humanize_button = st.button("✨ Humanize Text", use_container_width=True)
+    # Buttons layout
+    btn_col1, btn_col2 = st.columns(2)
+    with btn_col1:
+        detect_button = st.button("🔍 Detect AI", use_container_width=True)
+    with btn_col2:
+        humanize_button = st.button("✨ Humanize Text", use_container_width=True)
 
 # ---------------------------------------------------------------------------
 # Detection results
@@ -796,12 +822,14 @@ if detect_button:
     text_content = text_input.strip()
     if text_content:
         if len(text_content) < 600:
-            st.warning(f"⚠️ Please enter at least 600 characters for an accurate AI detection (currently {len(text_content)} characters).")
+            with col_left:
+                st.warning(f"⚠️ Please enter at least 600 characters for an accurate AI detection (currently {len(text_content)} characters).")
         elif not is_model_available():
-            st.error(
-                "⚠️ No trained model found. Run `python train_model.py` first "
-                "to train the classifier."
-            )
+            with col_left:
+                st.error(
+                    "⚠️ No trained model found. Run `python train_model.py` first "
+                    "to train the classifier."
+                )
         else:
             with bg_placeholder:
                 render_lexicon_swarm(app_state="ai_detected")
@@ -819,120 +847,122 @@ if detect_button:
             label = result["label"]
             verdict = result["verdict"]
 
-            # Render the 3D visualizer above the text area
-            with visualizer_placeholder:
+            # Render the 3D visualizer
+            with col_right:
                 render_score_visualizer(score_float, prob_pct, verdict)
 
-            # ---- AI DETECTED (only when probability > 35%) ----
-            if label == 1 and result["probability"] > 0.35:
-                fp_pct = round(fp_prob * 100, 2) if fp_prob is not None and fp_prob >= 0 else None
-
-                # ---- False Positive Probability ----
-                if fp_pct is not None:
-                    # Color-code: low FP = green (strong signal), high FP = amber (weak signal)
-                    if fp_pct <= 2:
-                        fp_color = "#4ade80"  # green-400
-                        fp_bg = "rgba(74, 222, 128, 0.1)"
-                        fp_border = "rgba(74, 222, 128, 0.3)"
-                        fp_icon = "✅"
-                        fp_note = "Very low false-positive risk. The AI signal is strong."
-                    elif fp_pct <= 10:
-                        fp_color = "#fbbf24"  # amber-400
-                        fp_bg = "rgba(251, 191, 36, 0.1)"
-                        fp_border = "rgba(251, 191, 36, 0.3)"
-                        fp_icon = "⚠️"
-                        fp_note = "Moderate false-positive risk. Consider reviewing manually."
-                    else:
-                        fp_color = "#f87171"  # red-400
-                        fp_bg = "rgba(248, 113, 113, 0.1)"
-                        fp_border = "rgba(248, 113, 113, 0.3)"
-                        fp_icon = "🔴"
-                        fp_note = "High false-positive risk. This could easily be a human who writes very predictably."
-
-                    st.markdown(f"""
-                    <div style="
-                        background: {fp_bg};
-                        border: 2px solid {fp_border};
-                        border-radius: 12px;
-                        padding: 1.5rem 2rem;
-                        margin: 0.75rem 0 1.5rem 0;
-                    ">
-                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
-                            <span style="font-size: 1.3rem;">{fp_icon}</span>
-                            <span style="
-                                font-size: 1rem;
-                                font-weight: 700;
+            with col_right:
+                # ---- AI DETECTED (only when probability > 35%) ----
+                if label == 1 and result["probability"] > 0.35:
+                    fp_pct = round(fp_prob * 100, 2) if fp_prob is not None and fp_prob >= 0 else None
+    
+                    # ---- False Positive Probability ----
+                    if fp_pct is not None:
+                        # Color-code: low FP = green (strong signal), high FP = amber (weak signal)
+                        if fp_pct <= 2:
+                            fp_color = "#4ade80"  # green-400
+                            fp_bg = "rgba(74, 222, 128, 0.1)"
+                            fp_border = "rgba(74, 222, 128, 0.3)"
+                            fp_icon = "✅"
+                            fp_note = "Very low false-positive risk. The AI signal is strong."
+                        elif fp_pct <= 10:
+                            fp_color = "#fbbf24"  # amber-400
+                            fp_bg = "rgba(251, 191, 36, 0.1)"
+                            fp_border = "rgba(251, 191, 36, 0.3)"
+                            fp_icon = "⚠️"
+                            fp_note = "Moderate false-positive risk. Consider reviewing manually."
+                        else:
+                            fp_color = "#f87171"  # red-400
+                            fp_bg = "rgba(248, 113, 113, 0.1)"
+                            fp_border = "rgba(248, 113, 113, 0.3)"
+                            fp_icon = "🔴"
+                            fp_note = "High false-positive risk. This could easily be a human who writes very predictably."
+    
+                        st.markdown(f"""
+                        <div style="
+                            background: {fp_bg};
+                            border: 2px solid {fp_border};
+                            border-radius: 12px;
+                            padding: 1.5rem 2rem;
+                            margin: 0.75rem 0 1.5rem 0;
+                        ">
+                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+                                <span style="font-size: 1.3rem;">{fp_icon}</span>
+                                <span style="
+                                    font-size: 1rem;
+                                    font-weight: 700;
+                                    color: {fp_color};
+                                    text-transform: uppercase;
+                                    letter-spacing: 0.05em;
+                                ">
+                                    False Positive Probability
+                                </span>
+                            </div>
+                            <div style="
+                                font-size: 2rem;
+                                font-weight: 800;
                                 color: {fp_color};
-                                text-transform: uppercase;
-                                letter-spacing: 0.05em;
+                                margin-bottom: 0.5rem;
                             ">
-                                False Positive Probability
-                            </span>
+                                {fp_pct}%
+                            </div>
+                            <div style="
+                                font-size: 0.9rem;
+                                color: #d1d5db;
+                                line-height: 1.5;
+                            ">
+                                There is a <strong>{fp_pct}%</strong> chance this text was actually written
+                                by a human who writes predictably. In our training dataset,
+                                <strong>{fp_pct}%</strong> of known human-written texts scored at or above
+                                {prob_pct}% AI confidence.
+                            </div>
+                            <div style="
+                                font-size: 0.85rem;
+                                color: #9ca3af;
+                                margin-top: 0.5rem;
+                                font-style: italic;
+                            ">
+                                {fp_note}
+                            </div>
                         </div>
-                        <div style="
-                            font-size: 2rem;
-                            font-weight: 800;
-                            color: {fp_color};
-                            margin-bottom: 0.5rem;
-                        ">
-                            {fp_pct}%
-                        </div>
-                        <div style="
-                            font-size: 0.9rem;
-                            color: #d1d5db;
-                            line-height: 1.5;
-                        ">
-                            There is a <strong>{fp_pct}%</strong> chance this text was actually written
-                            by a human who writes predictably. In our training dataset,
-                            <strong>{fp_pct}%</strong> of known human-written texts scored at or above
-                            {prob_pct}% AI confidence.
-                        </div>
-                        <div style="
-                            font-size: 0.85rem;
-                            color: #9ca3af;
-                            margin-top: 0.5rem;
-                            font-style: italic;
-                        ">
-                            {fp_note}
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    st.info(
-                        "ℹ️ False Positive Probability is unavailable. "
-                        "Re-train the model to enable calibration data."
-                    )
-
-            # ---- Feature breakdown (collapsible) ----
-            with st.expander("📊 Feature Breakdown"):
-                features = result["features"]
-                feat_cols = st.columns(3)
-                nice_names = {
-                    "avg_sentence_length": ("📏 Avg Sentence Length", "words"),
-                    "sentence_length_std": ("📐 Sentence Burstiness (StdDev)", ""),
-                    "vocab_richness": ("📖 Vocabulary Richness (TTR)", ""),
-                    "stopword_freq": ("🔤 Stop-word Frequency", ""),
-                    "sentence_count": ("📝 Sentence Count", ""),
-                    "avg_word_length": ("🔡 Avg Word Length", "chars"),
-                    "punctuation_ratio": ("✏️ Punctuation Ratio", ""),
-                    "flesch_kincaid_grade": ("🎓 Flesch-Kincaid Grade", ""),
-                    "paragraph_symmetry": ("⚖️ Paragraph Symmetry", ""),
-                    "trope_count": ("🤖 LLM Trope Count", "phrases"),
-                    "gemini_predictability": ("🧠 Gemini Predictability", "/1.0"),
-                    "gemini_trope_presence": ("🧠 Gemini Trope Score", "/1.0"),
-                }
-                for idx, (key, (label, unit)) in enumerate(nice_names.items()):
-                    val = features.get(key)
-                    if val is None:
-                        display_val = "N/A"
-                    elif isinstance(val, float) and val < 1:
-                        display_val = f"{val:.3f}{unit}"
+                        """, unsafe_allow_html=True)
                     else:
-                        display_val = f"{val:.1f}{unit}" if isinstance(val, float) else f"{val}{unit}"
-                    feat_cols[idx % 3].metric(label, display_val)
+                        st.info(
+                            "ℹ️ False Positive Probability is unavailable. "
+                            "Re-train the model to enable calibration data."
+                        )
+    
+                # ---- Feature breakdown (collapsible) ----
+                with st.expander("📊 Feature Breakdown"):
+                    features = result["features"]
+                    feat_cols = st.columns(3)
+                    nice_names = {
+                        "avg_sentence_length": ("📏 Avg Sentence Length", "words"),
+                        "sentence_length_std": ("📐 Sentence Burstiness (StdDev)", ""),
+                        "vocab_richness": ("📖 Vocabulary Richness (TTR)", ""),
+                        "stopword_freq": ("🔤 Stop-word Frequency", ""),
+                        "sentence_count": ("📝 Sentence Count", ""),
+                        "avg_word_length": ("🔡 Avg Word Length", "chars"),
+                        "punctuation_ratio": ("✏️ Punctuation Ratio", ""),
+                        "flesch_kincaid_grade": ("🎓 Flesch-Kincaid Grade", ""),
+                        "paragraph_symmetry": ("⚖️ Paragraph Symmetry", ""),
+                        "trope_count": ("🤖 LLM Trope Count", "phrases"),
+                        "gemini_predictability": ("🧠 Gemini Predictability", "/1.0"),
+                        "gemini_trope_presence": ("🧠 Gemini Trope Score", "/1.0"),
+                    }
+                    for idx, (key, (label, unit)) in enumerate(nice_names.items()):
+                        val = features.get(key)
+                        if val is None:
+                            display_val = "N/A"
+                        elif isinstance(val, float) and val < 1:
+                            display_val = f"{val:.3f}{unit}"
+                        else:
+                            display_val = f"{val:.1f}{unit}" if isinstance(val, float) else f"{val}{unit}"
+                        feat_cols[idx % 3].metric(label, display_val)
 
     else:
-        st.warning("Please enter some text to analyze.")
+        with col_left:
+            st.warning("Please enter some text to analyze.")
 
 # ---------------------------------------------------------------------------
 # Humanize results
@@ -941,7 +971,8 @@ if humanize_button:
     text_content = text_input.strip()
     if text_content:
         if len(text_content) < 600:
-            st.warning(f"⚠️ Please enter at least 600 characters for an accurate analysis and humanization (currently {len(text_content)} characters).")
+            with col_left:
+                st.warning(f"⚠️ Please enter at least 600 characters for an accurate analysis and humanization (currently {len(text_content)} characters).")
         else:
             # --- Conditional execution: skip humanization if text already reads as human ---
             skip_humanize = False
@@ -952,12 +983,13 @@ if humanize_button:
                 pre_prob = pre_check["probability"]
                 if pre_prob <= 0.35:
                     skip_humanize = True
-                    st.info(
-                        "🟢 **This text already reads as human-written. "
-                        "No humanization required.**\n\n"
-                        f"AI probability is only **{round(pre_prob * 100, 1)}%** "
-                        "(below the 40% threshold)."
-                    )
+                    with col_right:
+                        st.info(
+                            "🟢 **This text already reads as human-written. "
+                            "No humanization required.**\n\n"
+                            f"AI probability is only **{round(pre_prob * 100, 1)}%** "
+                            "(below the 40% threshold)."
+                        )
 
             if not skip_humanize:
                 # Switch background to humanized swirl immediately
@@ -968,41 +1000,43 @@ if humanize_button:
                     rewritten_text, error = humanize_text(text_input)
 
                 if rewritten_text is not None:
+                    with col_right:
+                        st.subheader("✨ Humanized Text")
+                        # Styled output container
+                        st.markdown(f"""
+                        <div style="
+                            background: rgba(2, 44, 34, 0.6);
+                            backdrop-filter: blur(12px);
+                            -webkit-backdrop-filter: blur(12px);
+                            border: 1px solid rgba(16, 185, 129, 0.3);
+                            border-radius: 16px;
+                            padding: 2rem 2.5rem;
+                            margin: 1rem 0;
+                            font-size: 1.05rem;
+                            line-height: 1.8;
+                            color: #ecfdf5;
+                            box-shadow: 0 4px 24px rgba(16, 185, 129, 0.15);
+                            white-space: pre-wrap;
+                            word-wrap: break-word;
+                            height: 400px;
+                            overflow-y: auto;
+                        ">{rewritten_text}</div>
+                        """, unsafe_allow_html=True)
 
-                    st.subheader("✨ Humanized Text")
-                    # Styled output container
-                    st.markdown(f"""
-                    <div style="
-                        background: rgba(2, 44, 34, 0.6);
-                        backdrop-filter: blur(12px);
-                        -webkit-backdrop-filter: blur(12px);
-                        border: 1px solid rgba(16, 185, 129, 0.3);
-                        border-radius: 16px;
-                        padding: 2rem 2.5rem;
-                        margin: 1rem 0;
-                        font-size: 1.05rem;
-                        line-height: 1.8;
-                        color: #ecfdf5;
-                        box-shadow: 0 4px 24px rgba(16, 185, 129, 0.15);
-                        white-space: pre-wrap;
-                        word-wrap: break-word;
-                        max-height: 400px;
-                        overflow-y: auto;
-                    ">{rewritten_text}</div>
-                    """, unsafe_allow_html=True)
-
-                    # Copy-friendly fallback in a collapsed expander
-                    with st.expander("📋 Copy-friendly plain text"):
-                        st.text_area(
-                            "Humanized output",
-                            value=rewritten_text,
-                            height=250,
-                            label_visibility="collapsed",
-                        )
+                        # Copy-friendly fallback in a collapsed expander
+                        with st.expander("📋 Copy-friendly plain text"):
+                            st.text_area(
+                                "Humanized output",
+                                value=rewritten_text,
+                                height=250,
+                                label_visibility="collapsed",
+                            )
                 else:
-                    st.error(f"❌ **Humanization failed.** {error}")
+                    with col_right:
+                        st.error(f"❌ **Humanization failed.** {error}")
     else:
-        st.warning("Please enter some text to humanize.")
+        with col_left:
+            st.warning("Please enter some text to humanize.")
 
 # Default idle visualizer — score widget area is empty when nothing has run
 if not detect_button and not humanize_button:
