@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 .DS_Store
 .env
+dataset.csv
+combined_dataset.csv
+AIvsHuman/
+AIvsHuman2/

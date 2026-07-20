@@ -119,7 +119,7 @@ def analyze_text(text):
 # ---------------------------------------------------------------------------
 # Few-Shot Humanizer – dynamically samples human-written examples each call
 # ---------------------------------------------------------------------------
-DATASET_PATH = os.path.join(os.path.dirname(__file__), "dataset.csv")
+DATASET_PATH = os.path.join(os.path.dirname(__file__), "combined_dataset.csv.gz")
 
 # Cache the human-only rows in memory so we don't re-read 100 MB on every click
 @st.cache_data(show_spinner=False)
@@ -820,8 +820,8 @@ if detect_button:
             with visualizer_placeholder:
                 render_score_visualizer(score_float, prob_pct, verdict)
 
-            # ---- AI DETECTED (only when probability > 40%) ----
-            if label == 1 and result["probability"] > 0.40:
+            # ---- AI DETECTED (only when probability > 35%) ----
+            if label == 1 and result["probability"] > 0.35:
                 fp_pct = round(fp_prob * 100, 2) if fp_prob is not None and fp_prob >= 0 else None
 
                 # ---- False Positive Probability ----
@@ -906,12 +906,17 @@ if detect_button:
                 feat_cols = st.columns(3)
                 nice_names = {
                     "avg_sentence_length": ("📏 Avg Sentence Length", "words"),
-                    "vocab_richness": ("📖 Vocabulary Richness", ""),
+                    "sentence_length_std": ("📐 Sentence Burstiness (StdDev)", ""),
+                    "vocab_richness": ("📖 Vocabulary Richness (TTR)", ""),
                     "stopword_freq": ("🔤 Stop-word Frequency", ""),
                     "sentence_count": ("📝 Sentence Count", ""),
                     "avg_word_length": ("🔡 Avg Word Length", "chars"),
                     "punctuation_ratio": ("✏️ Punctuation Ratio", ""),
-                    "gemini_predictability": ("🤖 Gemini Predictability", "/100"),
+                    "flesch_kincaid_grade": ("🎓 Flesch-Kincaid Grade", ""),
+                    "paragraph_symmetry": ("⚖️ Paragraph Symmetry", ""),
+                    "trope_count": ("🤖 LLM Trope Count", "phrases"),
+                    "gemini_predictability": ("🧠 Gemini Predictability", "/1.0"),
+                    "gemini_trope_presence": ("🧠 Gemini Trope Score", "/1.0"),
                 }
                 for idx, (key, (label, unit)) in enumerate(nice_names.items()):
                     val = features.get(key)
@@ -942,7 +947,7 @@ if humanize_button:
                     bundle = get_model_bundle()
                     pre_check = classify_text(text_input, bundle=bundle)
                 pre_prob = pre_check["probability"]
-                if pre_prob <= 0.40:
+                if pre_prob <= 0.35:
                     skip_humanize = True
                     st.info(
                         "🟢 **This text already reads as human-written. "

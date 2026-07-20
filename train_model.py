@@ -32,7 +32,7 @@ import pandas as pd
 import joblib
 from tqdm import tqdm
 
-from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-DEFAULT_CSV = "dataset.csv"
+DEFAULT_CSV = "combined_dataset.csv.gz"
 DEFAULT_SAMPLE = 2000
 DEFAULT_OUTPUT = "detector_model.pkl"
 DEFAULT_PRECISION_FLOOR = 0.30   # minimum acceptable precision when tuning
@@ -173,12 +173,12 @@ def train(
     )
     logger.info("Train: %d  |  Test: %d", len(X_train), len(X_test))
 
-    # ---- 6. Train Logistic Regression ----
-    model = LogisticRegression(
+    # ---- 6. Train Random Forest ----
+    model = RandomForestClassifier(
+        n_estimators=150,
         class_weight="balanced",
-        max_iter=1000,
-        solver="lbfgs",
         random_state=RANDOM_STATE,
+        n_jobs=-1
     )
     model.fit(X_train, y_train)
 

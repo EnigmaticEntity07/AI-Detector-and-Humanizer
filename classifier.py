@@ -93,7 +93,7 @@ def compute_false_positive_probability(prob_ai: float, bundle: dict) -> float:
 # Prediction
 # ---------------------------------------------------------------------------
 
-def predict(text: str, model_path: str = DEFAULT_MODEL_PATH, bundle: dict | None = None) -> dict:
+def predict(text: str, model_path: str = DEFAULT_MODEL_PATH, bundle: dict | None = None, custom_threshold: float = 0.35) -> dict:
     """Classify *text* as human (0) or AI-generated (1).
 
     Returns
@@ -111,7 +111,8 @@ def predict(text: str, model_path: str = DEFAULT_MODEL_PATH, bundle: dict | None
     model = bundle["model"]
     scaler = bundle["scaler"]
     imputer = bundle["imputer"]
-    threshold = bundle["threshold"]
+    # Allow overriding the bundle's dynamically tuned threshold with a strict custom threshold
+    threshold = custom_threshold if custom_threshold is not None else bundle["threshold"]
     feature_names = bundle["feature_names"]
     include_gemini = bundle.get("include_gemini", True)
 
