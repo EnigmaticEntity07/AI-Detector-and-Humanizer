@@ -9,6 +9,13 @@ import pandas as pd
 # pyrefly: ignore [missing-import]
 import google.generativeai as genai
 
+st.set_page_config(
+    page_title="AI Detector & Humanizer",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 # Configure Gemini strictly from environment for Railway
 api_key = os.environ.get("GEMINI_API_KEY")
 
@@ -201,19 +208,15 @@ Text to edit:
     except Exception as e:
         return None, f"An error occurred during humanization: {str(e)}"
 
-st.set_page_config(
-    page_title="AI Detector & Humanizer",
-    page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
 # Custom CSS for modern UI
 st.markdown("""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
     /* ── Global reset for transparent Streamlit shell ── */
+    .stApp {
+        overflow-y: auto !important;
+    }
     .stApp, .stApp > div, [data-testid="stAppViewContainer"] {
         background: transparent !important;
     }
@@ -357,7 +360,7 @@ def render_lexicon_swarm(app_state: str = "idle"):
     overflow: hidden;
     background: #070a14;
   }}
-  canvas {{ display:block; }}
+  canvas {{ display:block; pointer-events: none; z-index: -999; position: relative; }}
 </style>
 </head>
 <body>
@@ -970,8 +973,10 @@ if humanize_button:
                     # Styled output container
                     st.markdown(f"""
                     <div style="
-                        background: linear-gradient(135deg, #022c22 0%, #064e3b 100%);
-                        border: 2px solid #059669;
+                        background: rgba(2, 44, 34, 0.6);
+                        backdrop-filter: blur(12px);
+                        -webkit-backdrop-filter: blur(12px);
+                        border: 1px solid rgba(16, 185, 129, 0.3);
                         border-radius: 16px;
                         padding: 2rem 2.5rem;
                         margin: 1rem 0;
@@ -981,6 +986,8 @@ if humanize_button:
                         box-shadow: 0 4px 24px rgba(16, 185, 129, 0.15);
                         white-space: pre-wrap;
                         word-wrap: break-word;
+                        max-height: 400px;
+                        overflow-y: auto;
                     ">{rewritten_text}</div>
                     """, unsafe_allow_html=True)
 
