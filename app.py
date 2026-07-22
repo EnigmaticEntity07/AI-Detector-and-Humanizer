@@ -246,7 +246,7 @@ st.markdown("""
         font-family: 'Inter', sans-serif;
         color: #9ca3af;
         font-size: 1.05rem;
-        margin-bottom: 2rem;
+        margin-bottom: 1rem;
         letter-spacing: 0.01em;
     }
 
@@ -255,7 +255,7 @@ st.markdown("""
         background-color: rgba(17, 24, 39, 0.85) !important;
         border: 1.5px solid rgba(99, 102, 241, 0.35) !important;
         border-radius: 14px !important;
-        padding: 1rem !important;
+        padding: 1rem 1rem 2.8rem 1rem !important;
         font-size: 1rem !important;
         color: #f3f4f6 !important;
         backdrop-filter: blur(8px);
@@ -269,6 +269,40 @@ st.markdown("""
         border-color: #6366f1 !important;
         box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25) !important;
         background-color: rgba(17, 24, 39, 1.0) !important;
+    }
+
+    /* ── Docked Word Counter Badge ── */
+    .word-counter-wrapper {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        margin-top: -46px;
+        margin-bottom: 20px;
+        padding-right: 14px;
+        position: relative;
+        z-index: 5;
+        pointer-events: none;
+    }
+    .word-counter-badge {
+        font-family: 'Inter', sans-serif;
+        font-size: 0.825rem;
+        font-weight: 600;
+        padding: 5px 14px;
+        border-radius: 20px;
+        backdrop-filter: blur(12px);
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+        letter-spacing: 0.02em;
+    }
+    .word-counter-invalid {
+        color: #f87171;
+        background: rgba(239, 68, 68, 0.15);
+        border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+    .word-counter-valid {
+        color: #34d399;
+        background: rgba(16, 185, 129, 0.15);
+        border: 1px solid rgba(16, 185, 129, 0.4);
     }
 
     /* ── Scrollbar Styling ── */
@@ -306,7 +340,7 @@ st.markdown("""
         color: white;
         box-shadow: 0 2px 12px rgba(99, 102, 241, 0.35);
     }
-    div[data-testid="column"]:nth-of-type(1) .stButton > button:hover {
+    div[data-testid="column"]:nth-of-type(1) .stButton > button:hover:not(:disabled) {
         background: linear-gradient(135deg, #818cf8 0%, #6366f1 100%);
         box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
         transform: translateY(-2px);
@@ -316,10 +350,19 @@ st.markdown("""
         color: white;
         box-shadow: 0 2px 12px rgba(16, 185, 129, 0.35);
     }
-    div[data-testid="column"]:nth-of-type(2) .stButton > button:hover {
+    div[data-testid="column"]:nth-of-type(2) .stButton > button:hover:not(:disabled) {
         background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
         box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5);
         transform: translateY(-2px);
+    }
+    .stButton > button:disabled {
+        background: rgba(31, 41, 55, 0.6) !important;
+        color: #6b7280 !important;
+        border: 1px solid rgba(55, 65, 81, 0.4) !important;
+        box-shadow: none !important;
+        cursor: not-allowed !important;
+        transform: none !important;
+        opacity: 0.65;
     }
 
     /* ── Metric cards / expanders — glassmorphism ── */
@@ -345,6 +388,7 @@ st.markdown("""
         background: rgba(17, 24, 39, 0.8) !important;
         backdrop-filter: blur(8px);
         border-radius: 12px !important;
+        margin-bottom: 1rem !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -789,9 +833,10 @@ def render_score_visualizer(score_float, prob_pct, verdict):
 # (render_humanizer_visualizer and set_humanizer_state have been replaced
 #  by render_lexicon_swarm with app_state='humanized')
 
-# Main UI layout
-st.markdown('<div class="main-title">AI Detector & Humanizer 🤖</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Analyze your text to check if it was written by AI, or rewrite it to sound more natural.</div>', unsafe_allow_html=True)
+# Main UI layout - Centered Header
+st.markdown('<div class="main-title" style="text-align: center;">AI Detector & Humanizer 🤖</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title" style="text-align: center;">Analyze your text to check if it was written by AI, or rewrite it to sound more natural.</div>', unsafe_allow_html=True)
+st.divider()
 
 if "input_text" not in st.session_state:
     st.session_state.input_text = ""
@@ -808,22 +853,41 @@ with col_left:
         key="input_text"
     )
 
-    # Buttons layout
+    # Dynamic Word Count Indicator
+    raw_text = text_input.strip()
+    words = raw_text.split() if raw_text else []
+    word_count = len(words)
+    is_valid_count = word_count >= 600
+
+    badge_class = "word-counter-valid" if is_valid_count else "word-counter-invalid"
+    st.markdown(f"""
+    <div class="word-counter-wrapper">
+        <div class="word-counter-badge {badge_class}">
+            Word Count: <strong>{word_count}</strong> / 600 Min.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if not is_valid_count:
+        st.warning(f"⚠️ Minimum 600 words required for AI detection and humanization (currently {word_count} words).")
+
+    # Cohesive control buttons directly under input box
     btn_col1, btn_col2 = st.columns(2)
     with btn_col1:
-        detect_button = st.button("🔍 Detect AI", use_container_width=True)
+        detect_button = st.button("🔍 Detect AI", disabled=not is_valid_count, use_container_width=True)
     with btn_col2:
-        humanize_button = st.button("✨ Humanize Text", use_container_width=True)
+        humanize_button = st.button("✨ Humanize Text", disabled=not is_valid_count, use_container_width=True)
 
 # ---------------------------------------------------------------------------
 # Detection results
 # ---------------------------------------------------------------------------
 if detect_button:
     text_content = text_input.strip()
-    if text_content:
-        if len(text_content) < 600:
+    words = text_content.split() if text_content else []
+    if words:
+        if len(words) < 600:
             with col_left:
-                st.warning(f"⚠️ Please enter at least 600 characters for an accurate AI detection (currently {len(text_content)} characters).")
+                st.warning(f"⚠️ Please enter at least 600 words for an accurate AI detection (currently {len(words)} words).")
         elif not is_model_available():
             with col_left:
                 st.error(
@@ -969,10 +1033,11 @@ if detect_button:
 # ---------------------------------------------------------------------------
 if humanize_button:
     text_content = text_input.strip()
-    if text_content:
-        if len(text_content) < 600:
+    words = text_content.split() if text_content else []
+    if words:
+        if len(words) < 600:
             with col_left:
-                st.warning(f"⚠️ Please enter at least 600 characters for an accurate analysis and humanization (currently {len(text_content)} characters).")
+                st.warning(f"⚠️ Please enter at least 600 words for an accurate analysis and humanization (currently {len(words)} words).")
         else:
             # --- Conditional execution: skip humanization if text already reads as human ---
             skip_humanize = False
