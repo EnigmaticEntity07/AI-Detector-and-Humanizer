@@ -22,4 +22,4 @@ A production-grade web application built to strictly detect AI-generated text an
 1. **Clone the repository:**
    ```bash
    git clone [https://github.com/EnigmaticEntity7/AI-Detector-and-Humanizer.git](https://github.com/EnigmaticEntity7/AI-Detector-and-Humanizer.git)
-   cd YourRepositoryName
+   cd AI-Detector-and-Humanizer
