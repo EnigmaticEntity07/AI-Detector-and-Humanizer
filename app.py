@@ -38,6 +38,58 @@ RETRY_BASE_DELAY = 5  # seconds; doubles each retry
 
 API_TIMEOUT = 60  # seconds – maximum time to wait for a single Gemini call
 
+# ---------------------------------------------------------------------------
+# Vocabulary Controls — AI Fingerprint Blacklist & Human Fingerprint Encouragement
+# ---------------------------------------------------------------------------
+import re
+
+BLACKLISTED_WORDS = {
+    "verbs": [
+        "delve", "leverage", "foster", "harness", "navigate",
+        "elevate", "illuminate", "unpack", "underscore",
+    ],
+    "nouns": [
+        "tapestry", "realm", "landscape", "catalyst", "testament",
+        "interplay", "crux", "ecosystem",
+    ],
+    "adjectives": [
+        "pivotal", "multifaceted", "paramount", "intricate",
+        "profound", "seamless", "transformative",
+    ],
+    "transitions": [
+        "furthermore", "moreover", "in addition",
+        "it is important to note that", "crucially", "notably",
+        "remarkably", "in summary", "ultimately", "in conclusion",
+    ],
+}
+
+# Flatten for regex and prompt construction
+_ALL_BLACKLISTED = []
+for _cat in BLACKLISTED_WORDS.values():
+    _ALL_BLACKLISTED.extend(_cat)
+
+# Pre-compiled regex for fast scanning (case-insensitive, whole-word for single words,
+# plain substring match for multi-word phrases)
+_pattern_parts = []
+for _word in _ALL_BLACKLISTED:
+    if " " in _word:
+        _pattern_parts.append(re.escape(_word))
+    else:
+        _pattern_parts.append(r"\b" + re.escape(_word) + r"\b")
+BLACKLIST_REGEX = re.compile("|".join(_pattern_parts), re.IGNORECASE)
+
+ENCOURAGED_VOCAB = {
+    "transitions": [
+        '"Look,"', '"Here\'s the thing:"', '"Truth be told,"',
+        '"Turns out..."', '"That said,"', '"Bottom line:"',
+    ],
+    "verbs_adjectives": [
+        "cluttered", "slapped", "jammed", "muttered", "stumbled",
+        "botched", "clunky", "half-baked", "slapdash", "quirky",
+        "gritty", "unwieldy",
+    ],
+}
+
 
 def call_gemini(prompt, timeout: int = API_TIMEOUT):
     """Try each model in the fallback chain with retry/backoff for rate limits.
@@ -166,7 +218,25 @@ def get_human_examples(n: int = 3, max_chars: int = 500) -> list[str]:
     return truncated
 
 
-def humanize_text(text, tone: str = "Casual / Blog"):
+def _build_blacklist_prompt_block() -> str:
+    """Build a formatted blacklist block for the Gemini prompt."""
+    lines = ["HARD VOCABULARY BLACKLIST — You MUST NOT use any of the following words or phrases under ANY circumstances:"]
+    for category, words in BLACKLISTED_WORDS.items():
+        lines.append(f"  {category.title()}: {', '.join(words)}")
+    return "\n".join(lines)
+
+
+def _build_encouraged_prompt_block() -> str:
+    """Build a formatted encouraged-vocabulary block for the Gemini prompt."""
+    lines = ["ENCOURAGED VOCABULARY — Naturally incorporate these varied, grounded expressions where appropriate:"]
+    for category, words in ENCOURAGED_VOCAB.items():
+        label = category.replace("_", "/").title()
+        lines.append(f"  {label}: {', '.join(words)}")
+    return "\n".join(lines)
+
+
+def _draft_humanized_text(text, tone: str = "Casual / Blog", previous_draft=None,
+                          previous_score=None, retry_context: str = ""):
     if not api_key:
         return None, "Error: GEMINI_API_KEY is not set in Streamlit secrets or environment variables."
 
@@ -175,7 +245,7 @@ def humanize_text(text, tone: str = "Casual / Blog"):
         examples = query_human_examples(text, n=3)
         if not examples or len(examples) < 3:
             examples = get_human_examples(3)
-            
+
         examples_block = "\n\n---\n\n".join(
             f"Example {i + 1}:\n{ex}" for i, ex in enumerate(examples)
         )
@@ -197,7 +267,44 @@ def humanize_text(text, tone: str = "Casual / Blog"):
                 "with natural pacing and an organic personal perspective."
             )
 
-        prompt_1 = f"""You are an expert humanizer. Rewrite this text to bypass AI detectors while strictly maintaining a {tone} tone.
+        blacklist_block = _build_blacklist_prompt_block()
+        encouraged_block = _build_encouraged_prompt_block()
+        input_word_count = len(text.split())
+        min_words = max(input_word_count - 100, 1)
+
+        length_rule = (
+            f"LENGTH PRESERVATION RULE: Maintain the depth and detail of the input. "
+            f"The input is {input_word_count} words. The output word count MUST be within 100 words "
+            f"of the original input length (minimum {min_words} words). "
+            f"Do NOT summarize or heavily trim content."
+        )
+
+        if previous_draft and previous_score is not None:
+            retry_directive = retry_context if retry_context else ""
+            prompt_1 = f"""You are an expert humanizer. This draft failed AI detection with a score of {previous_score}%.
+Rewrite it, drastically increasing the sentence length variance and removing predictable transitions.
+
+{retry_directive}
+
+Tone Instruction:
+{tone_guidance}
+
+{blacklist_block}
+
+{encouraged_block}
+
+{length_rule}
+
+Sentence Variance: You must drastically vary sentence lengths. Mix punchy 3-word sentences with complex 30-word sentences. Never write three sentences of similar length in a row.
+
+Structural Asymmetry: Use active voice exclusively. Break predictable paragraph patterns—include at least one single-sentence paragraph.
+
+Return ONLY the rewritten text, without any additional explanations or markdown formatting.
+
+Draft to rewrite:
+{previous_draft}"""
+        else:
+            prompt_1 = f"""You are an expert humanizer. Rewrite this text to bypass AI detectors while strictly maintaining a {tone} tone.
 
 Study the varied sentence lengths, colloquial pacing, and natural imperfections in these three human-written examples:
 
@@ -210,11 +317,15 @@ Return ONLY the rewritten text, without any additional explanations or markdown 
 Tone Instruction:
 {tone_guidance}
 
-You must introduce natural human variance in sentence length, structure, and vocabulary while adhering to the target {tone} tone. Under NO circumstances should you introduce grammatical errors, typos, or factual inaccuracies to achieve this. The output must remain 100% grammatically correct, highly meaningful, and retain the original intent of the input text.
+{blacklist_block}
 
-Negative Constraints: You MUST absolutely avoid common AI filler words and transition tropes. DO NOT use words like: delve, tapestry, testament, beacon, furthermore, moreover, it is important to note, in conclusion, ultimately, a symphony of.
+{encouraged_block}
 
-Structural Asymmetry (Burstiness): Human writing is messy. Force the text to have extreme variance in sentence length. Follow a very long, complex sentence with a tiny, punchy one (e.g., 3-5 words).
+{length_rule}
+
+Sentence Variance: You must drastically vary sentence lengths. Mix punchy 3-word sentences with complex 30-word sentences. Never write three sentences of similar length in a row.
+
+Structural Asymmetry: Use active voice exclusively. Break predictable paragraph patterns—include at least one single-sentence paragraph.
 
 Text to rewrite:
 {text}"""
@@ -222,21 +333,173 @@ Text to rewrite:
         # Pass 1: Rewrite
         response_1 = call_gemini(prompt_1)
         rewritten_text = response_1.text.strip()
-        
-        # Pass 2: Critique
-        prompt_2 = f"""Analyze this text for any lingering AI tropes, robotic transitions, or uniform sentence pacing. Edit it one final time to ensure it sounds like an authentic human writer maintaining a {tone} tone.
+
+        # Pass 2: Critique (only on first pass, not retries, to keep loop latency low)
+        if not previous_draft:
+            prompt_2 = f"""Analyze this text for any lingering AI tropes, robotic transitions, or uniform sentence pacing. Edit it one final time to ensure it sounds like an authentic human writer maintaining a {tone} tone.
 
 Return ONLY the final edited text, without any additional explanations or markdown formatting.
 
 Text to edit:
 {rewritten_text}"""
-        
-        response_2 = call_gemini(prompt_2)
-        return response_2.text.strip(), None
+            response_2 = call_gemini(prompt_2)
+            rewritten_text = response_2.text.strip()
+
+        return rewritten_text, None
     except TimeoutError:
         return None, "⏱️ The humanization request timed out. The API took too long to respond. Please try again in a moment."
     except Exception as e:
         return None, f"An error occurred during humanization: {str(e)}"
+
+
+def _scan_blacklist(text: str) -> list[str]:
+    """Return a deduplicated list of blacklisted words/phrases found in *text*."""
+    matches = BLACKLIST_REGEX.findall(text)
+    # Deduplicate while preserving order, case-insensitive
+    seen = set()
+    unique = []
+    for m in matches:
+        key = m.lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(m)
+    return unique
+
+
+def validate_and_humanize(input_text, tone, max_retries=3,
+                          status_container=None, bundle=None):
+    """Humanize text with a strict 3-check validation loop.
+
+    Runs up to *max_retries* iterations. Each iteration checks:
+      1. Word count preservation (within 100 words of input)
+      2. Regex blacklist scan (zero AI-fingerprint words)
+      3. Internal AI detector score (probability ≤ 0.20)
+
+    Returns a result dict with keys:
+        text, attempts, final_score, word_count_diff,
+        blacklist_clean, passed_all, error
+    """
+    input_wc = len(input_text.split())
+    min_words = max(input_wc - 100, 1)
+
+    best_draft = None
+    best_score = 100.0
+
+    # --- Initial draft ---
+    if status_container:
+        st.write("✏️ Drafting initial response...")
+    current_draft, error = _draft_humanized_text(input_text, tone=tone)
+    if error or not current_draft:
+        return {
+            "text": current_draft,
+            "attempts": 0,
+            "final_score": -1,
+            "word_count_diff": 0,
+            "blacklist_clean": False,
+            "passed_all": False,
+            "error": error,
+        }
+
+    for attempt in range(1, max_retries + 1):
+        retry_reasons = []
+        output_wc = len(current_draft.split())
+        wc_diff = output_wc - input_wc
+
+        # ── Check 1: Word Count ──────────────────────────────────────────────
+        if status_container:
+            st.write(f"📏 Checking word count preservation (Target: ≥ {min_words} words)...")
+        wc_ok = output_wc >= min_words
+        if not wc_ok:
+            retry_reasons.append(
+                f"Word count too short ({output_wc} words vs. minimum {min_words}). "
+                "Expand on the details and maintain the original scope—the previous draft was too short."
+            )
+
+        # ── Check 2: Blacklist Scan ──────────────────────────────────────────
+        if status_container:
+            st.write("🔍 Scanning output for AI vocabulary fingerprints...")
+        violations = _scan_blacklist(current_draft)
+        bl_ok = len(violations) == 0
+        if not bl_ok:
+            retry_reasons.append(
+                f"Forbidden AI words found: {', '.join(violations)}. "
+                "Remove these and replace them with natural alternatives."
+            )
+
+        # ── Check 3: AI Detector Scoring ─────────────────────────────────────
+        if status_container:
+            st.write("🧪 Running verification against internal Gradient Boosting detector...")
+        check = classify_text(current_draft, bundle=bundle)
+        prob = check["probability"]
+        prob_pct = prob * 100
+
+        if prob_pct < best_score:
+            best_score = prob_pct
+            best_draft = current_draft
+
+        det_ok = prob <= 0.20
+        if not det_ok:
+            retry_reasons.append(
+                f"This draft triggered AI detection with a score of {prob_pct:.1f}%. "
+                "Increase sentence length variance (burstiness) and remove repetitive rhythms."
+            )
+
+        # ── All checks passed ────────────────────────────────────────────────
+        if not retry_reasons:
+            if status_container:
+                st.write(f"✅ All checks passed on attempt {attempt}!")
+            return {
+                "text": current_draft,
+                "attempts": attempt,
+                "final_score": prob_pct,
+                "word_count_diff": wc_diff,
+                "blacklist_clean": True,
+                "passed_all": True,
+                "error": None,
+            }
+
+        # ── Retry ────────────────────────────────────────────────────────────
+        if attempt < max_retries:
+            combined_reason = " | ".join(retry_reasons)
+            if status_container:
+                st.write(f"🔄 **Attempt {attempt} failed:** {combined_reason}")
+                st.write(f"↻ Retrying (attempt {attempt + 1} of {max_retries})...")
+            retry_context = "\n".join(
+                f"CORRECTION {i+1}: {r}" for i, r in enumerate(retry_reasons)
+            )
+            current_draft, error = _draft_humanized_text(
+                input_text,
+                tone=tone,
+                previous_draft=current_draft,
+                previous_score=round(prob_pct, 1),
+                retry_context=retry_context,
+            )
+            if error or not current_draft:
+                return {
+                    "text": best_draft,
+                    "attempts": attempt,
+                    "final_score": best_score,
+                    "word_count_diff": len(best_draft.split()) - input_wc if best_draft else 0,
+                    "blacklist_clean": len(_scan_blacklist(best_draft)) == 0 if best_draft else False,
+                    "passed_all": False,
+                    "error": error,
+                }
+
+    # ── Exhausted retries — return the best draft we have ────────────────────
+    final_draft = best_draft or current_draft
+    final_violations = _scan_blacklist(final_draft) if final_draft else []
+    final_wc_diff = len(final_draft.split()) - input_wc if final_draft else 0
+    if status_container:
+        st.write(f"⚠️ Completed {max_retries} attempts. Best AI score: {best_score:.1f}%")
+    return {
+        "text": final_draft,
+        "attempts": max_retries,
+        "final_score": best_score,
+        "word_count_diff": final_wc_diff,
+        "blacklist_clean": len(final_violations) == 0,
+        "passed_all": False,
+        "error": None,
+    }
 
 
 # Custom CSS for modern UI
@@ -1268,13 +1531,98 @@ if humanize_button:
                     render_lexicon_swarm(app_state="humanized")
 
                 tone_val = st.session_state.get("selected_tone", "Casual / Blog")
-                with st.spinner(f"Humanizing text ({tone_val})… this may take a few seconds"):
-                    rewritten_text, error = humanize_text(text_input, tone=tone_val)
+                status_widget = st.status("Humanizing and verifying text...", expanded=True)
+                with status_widget:
+                    result = validate_and_humanize(
+                        text_input,
+                        tone=tone_val,
+                        max_retries=3,
+                        status_container=status_widget,
+                        bundle=bundle,
+                    )
 
+                # Update status widget final state
+                if result["passed_all"]:
+                    status_widget.update(
+                        label=f"✅ Humanization complete — all checks passed (Attempt {result['attempts']})",
+                        state="complete",
+                    )
+                elif result["text"]:
+                    status_widget.update(
+                        label=f"⚠️ Completed after {result['attempts']} attempts (Best Score: {result['final_score']:.1f}%)",
+                        state="complete",
+                    )
+                else:
+                    status_widget.update(label="❌ Humanization failed", state="error")
 
+                rewritten_text = result["text"]
+                error = result["error"]
+
+                if error:
+                    with col_right:
+                        st.error(error)
                 if rewritten_text is not None:
                     with col_right:
                         st.subheader("✨ Humanized Text")
+
+                        # ── Confirmation Badge ────────────────────────────────
+                        wc_diff = result["word_count_diff"]
+                        wc_sign = "+" if wc_diff >= 0 else ""
+                        score_val = result["final_score"]
+                        passed = result["passed_all"]
+                        bl_clean = result["blacklist_clean"]
+
+                        # Color coding
+                        badge_bg = "rgba(16, 185, 129, 0.12)" if passed else "rgba(245, 158, 11, 0.12)"
+                        badge_border = "rgba(16, 185, 129, 0.4)" if passed else "rgba(245, 158, 11, 0.4)"
+                        badge_icon = "✅" if passed else "⚠️"
+                        badge_label = "ALL CHECKS PASSED" if passed else "BEST EFFORT (not all checks passed)"
+
+                        wc_color = "#34d399" if wc_diff >= -100 else "#f87171"
+                        score_color = "#34d399" if score_val <= 20 else ("#fbbf24" if score_val <= 40 else "#f87171")
+                        bl_color = "#34d399" if bl_clean else "#f87171"
+
+                        st.markdown(f"""
+                        <div style="
+                            background: {badge_bg};
+                            border: 1px solid {badge_border};
+                            border-radius: 12px;
+                            padding: 1rem 1.25rem;
+                            margin-bottom: 1rem;
+                            backdrop-filter: blur(8px);
+                        ">
+                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem;">
+                                <span style="font-size: 1.1rem;">{badge_icon}</span>
+                                <span style="
+                                    font-size: 0.85rem;
+                                    font-weight: 700;
+                                    color: {'#34d399' if passed else '#fbbf24'};
+                                    text-transform: uppercase;
+                                    letter-spacing: 0.05em;
+                                ">{badge_label}</span>
+                                <span style="
+                                    font-size: 0.78rem;
+                                    color: #9ca3af;
+                                    margin-left: auto;
+                                ">Attempts: {result['attempts']}</span>
+                            </div>
+                            <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; font-size: 0.88rem;">
+                                <div>
+                                    <span style="color: #9ca3af;">Word Count Δ: </span>
+                                    <strong style="color: {wc_color};">{wc_sign}{wc_diff} words</strong>
+                                </div>
+                                <div>
+                                    <span style="color: #9ca3af;">AI Score: </span>
+                                    <strong style="color: {score_color};">{score_val:.1f}%</strong>
+                                </div>
+                                <div>
+                                    <span style="color: #9ca3af;">Blacklist: </span>
+                                    <strong style="color: {bl_color};">{'Clean ✓' if bl_clean else 'Violations ✗'}</strong>
+                                </div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
                         # Styled output container
                         st.markdown(f"""
                         <div style="
