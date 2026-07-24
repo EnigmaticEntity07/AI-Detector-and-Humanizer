@@ -73,7 +73,7 @@ def compute_false_positive_probability(prob_ai: float, bundle: dict) -> float:
     """Estimate the probability that a *human* text would score ≥ *prob_ai*.
 
     Uses the sorted array of P(AI) scores for all human samples seen during
-    training (``bundle["human_probs_sorted"]``).  Returns a value in [0, 1]
+    training (``bundle["human_probs_sorted"]``). Returns a value in [0, 1]
     representing the fraction of human texts that reached this confidence
     level — i.e. the empirical false-positive rate at that threshold.
 
@@ -89,6 +89,19 @@ def compute_false_positive_probability(prob_ai: float, bundle: dict) -> float:
     return round(float(n_above / len(human_probs)), 6)
 
 
+def compute_margin_of_error(fp_prob: float, bundle: dict, confidence_level: float = 0.95) -> float:
+    """Compute the 95% confidence interval margin of error for the classification threshold.
+
+    Uses standard error calculation: z * sqrt(p * (1 - p) / N)
+    """
+    human_probs = bundle.get("human_probs_sorted")
+    n_samples = len(human_probs) if human_probs is not None and len(human_probs) > 0 else 500
+    p = max(min(fp_prob, 0.999), 0.001) if fp_prob >= 0 else 0.05
+    z = 1.96  # 95% confidence
+    moe = z * np.sqrt((p * (1.0 - p)) / n_samples)
+    return round(float(moe * 100), 2)
+
+
 # ---------------------------------------------------------------------------
 # Prediction
 # ---------------------------------------------------------------------------
@@ -99,11 +112,14 @@ def predict(text: str, model_path: str = DEFAULT_MODEL_PATH, bundle: dict | None
     Returns
     -------
     dict
-        label        : int — 0 (human) or 1 (AI)
-        probability  : float — P(AI) from the model
-        threshold    : float — decision boundary used
-        verdict      : str — human-readable verdict
-        features     : dict — raw feature values extracted from the text
+        label                  : int — 0 (human) or 1 (AI)
+        probability            : float — raw P(AI) from the model
+        calibrated_probability : float — Isotonic Regression calibrated P(AI)
+        threshold              : float — decision boundary used
+        verdict                : str — human-readable verdict
+        features               : dict — raw feature values extracted from the text
+        false_positive_probability: float — probability human text scores >= prob_ai
+        margin_of_error        : float — statistical margin of error (%) for threshold
     """
     if bundle is None:
         bundle = load_bundle(model_path)
@@ -117,7 +133,6 @@ def predict(text: str, model_path: str = DEFAULT_MODEL_PATH, bundle: dict | None
     include_gemini = bundle.get("include_gemini", True)
 
     # --- Extract features ---
-    # Always extract Gemini feature for UI display, regardless of model training flags
     raw_features = extract_all_features(text, include_gemini=True)
 
     # Build feature vector in the correct order
@@ -131,14 +146,22 @@ def predict(text: str, model_path: str = DEFAULT_MODEL_PATH, bundle: dict | None
 
     # --- Predict ---
     prob_ai = float(model.predict_proba(feature_vector)[0, 1])
+
+    # --- Isotonic Regression Calibration ---
+    iso_cal = bundle.get("isotonic_calibrator")
+    if iso_cal is not None:
+        try:
+            calibrated_prob = float(iso_cal.transform([prob_ai])[0])
+        except Exception:
+            calibrated_prob = prob_ai
+    else:
+        calibrated_prob = prob_ai
+
     label = int(prob_ai >= threshold)
 
-    # False-positive probability (only meaningful when flagged as AI)
-    fp_prob = (
-        compute_false_positive_probability(prob_ai, bundle)
-        if label == 1
-        else None
-    )
+    # False-positive probability
+    fp_prob = compute_false_positive_probability(prob_ai, bundle)
+    moe = compute_margin_of_error(fp_prob if fp_prob >= 0 else 0.05, bundle)
 
     # Human-readable verdict
     if prob_ai >= 0.80:
@@ -153,16 +176,82 @@ def predict(text: str, model_path: str = DEFAULT_MODEL_PATH, bundle: dict | None
     return {
         "label": label,
         "probability": round(prob_ai, 4),
+        "calibrated_probability": round(calibrated_prob, 4),
         "threshold": threshold,
         "verdict": verdict,
         "features": raw_features,
-        "false_positive_probability": fp_prob,
+        "false_positive_probability": fp_prob if fp_prob >= 0 else None,
+        "margin_of_error": moe,
     }
+
+
+def predict_sentences(text: str, model_path: str = DEFAULT_MODEL_PATH, bundle: dict | None = None) -> list[list[dict]]:
+    """Split *text* into paragraphs and sentences, then run localized classifier
+    inference on each individual sentence.
+
+    Returns a list of paragraphs, where each paragraph is a list of sentence dicts:
+    [
+        [
+            {"text": "Sentence 1 text...", "score": 0.85, "prob_pct": 85.0, "label": 1},
+            ...
+        ], ...
+    ]
+    """
+    from nltk.tokenize import sent_tokenize
+
+    if bundle is None:
+        bundle = load_bundle(model_path)
+
+    model = bundle["model"]
+    scaler = bundle["scaler"]
+    imputer = bundle["imputer"]
+    feature_names = bundle["feature_names"]
+    threshold = bundle.get("threshold", 0.35)
+
+    paragraphs_raw = text.split("\n")
+    paragraphs_result = []
+
+    for para in paragraphs_raw:
+        para_trimmed = para.strip()
+        if not para_trimmed:
+            paragraphs_result.append([])
+            continue
+
+        sentences = sent_tokenize(para_trimmed)
+        if not sentences:
+            sentences = [para_trimmed]
+
+        sentence_dicts = []
+        for sent in sentences:
+            sent_str = sent.strip()
+            if not sent_str:
+                continue
+
+            # Fast structural feature extraction (no Gemini API calls for individual sentences)
+            raw_feats = extract_all_features(sent_str, include_gemini=False)
+            feat_vector = np.array([[raw_feats.get(f) for f in feature_names]])
+
+            feat_imputed = imputer.transform(feat_vector)
+            feat_scaled = scaler.transform(feat_imputed)
+
+            prob_ai = float(model.predict_proba(feat_scaled)[0, 1])
+
+            sentence_dicts.append({
+                "text": sent_str,
+                "score": round(prob_ai, 4),
+                "prob_pct": round(prob_ai * 100, 1),
+                "label": int(prob_ai >= threshold)
+            })
+
+        paragraphs_result.append(sentence_dicts)
+
+    return paragraphs_result
 
 
 # ---------------------------------------------------------------------------
 # Quick smoke-test when run directly
 # ---------------------------------------------------------------------------
+
 if __name__ == "__main__":
     test_texts = [
         (

@@ -41,8 +41,11 @@ from sklearn.metrics import (
     confusion_matrix,
     precision_recall_curve,
 )
+from sklearn.isotonic import IsotonicRegression
 
 from feature_extractor import extract_all_features
+from data_loader import load_and_harmonize_datasets
+
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -51,7 +54,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-DEFAULT_CSV = "combined_dataset.csv.gz"
+DEFAULT_DATA_DIR = "./data"
 DEFAULT_SAMPLE = 2000
 DEFAULT_OUTPUT = "detector_model.pkl"
 DEFAULT_PRECISION_FLOOR = 0.30   # minimum acceptable precision when tuning
@@ -118,7 +121,7 @@ def find_best_threshold(
 # ---------------------------------------------------------------------------
 
 def train(
-    csv_path: str = DEFAULT_CSV,
+    data_dir: str = DEFAULT_DATA_DIR,
     sample_size: int = DEFAULT_SAMPLE,
     include_gemini: bool = True,
     output_path: str = DEFAULT_OUTPUT,
@@ -127,11 +130,11 @@ def train(
     """Run the full training pipeline and save the model bundle."""
 
     # ---- 1. Load data ----
-    logger.info("Loading dataset from %s ...", csv_path)
-    df = pd.read_csv(csv_path)
+    logger.info("Loading dataset from %s ...", data_dir)
+    df = load_and_harmonize_datasets(data_dir)
 
-    if "text" not in df.columns or "label" not in df.columns:
-        logger.error("CSV must contain 'text' and 'label' columns.")
+    if df.empty:
+        logger.error("Data directory must contain datasets with 'text' and 'label' columns.")
         sys.exit(1)
 
     df = df[["text", "label"]].dropna()
@@ -205,7 +208,12 @@ def train(
     cm = confusion_matrix(y_test, y_pred_tuned)
     logger.info("Confusion Matrix:\n%s", cm)
 
-    # ---- 9. Build false-positive calibration data ----
+    # ---- 9. Build false-positive calibration data & Isotonic Regression ----
+    # Fit Isotonic Regression to calibrate probabilities
+    iso_reg = IsotonicRegression(y_min=0.0, y_max=1.0, out_of_bounds="clip")
+    iso_reg.fit(y_prob_test, y_test)
+    logger.info("Fitted Isotonic Regression calibrator on test predictions.")
+
     # For every human sample in the *full* dataset, record P(AI).
     # At inference we can then answer: "What fraction of known-human texts
     # scored ≥ this confidence?" — i.e., the false-positive probability.
@@ -228,11 +236,13 @@ def train(
         "feature_names": feature_names,
         "include_gemini": include_gemini,
         "human_probs_sorted": human_probs_sorted,
+        "isotonic_calibrator": iso_reg,
     }
     joblib.dump(bundle, output_path)
     logger.info("Model bundle saved to  %s", output_path)
 
     return bundle
+
 
 
 # ---------------------------------------------------------------------------
@@ -244,8 +254,8 @@ def main():
         description="Train the AI detector classifier."
     )
     parser.add_argument(
-        "--csv", default=DEFAULT_CSV,
-        help=f"Path to the dataset CSV (default: {DEFAULT_CSV})",
+        "--data-dir", default=DEFAULT_DATA_DIR,
+        help=f"Path to the directory containing dataset CSV/JSONs (default: {DEFAULT_DATA_DIR})",
     )
     parser.add_argument(
         "--sample-size", type=int, default=DEFAULT_SAMPLE,
@@ -267,7 +277,7 @@ def main():
     args = parser.parse_args()
 
     train(
-        csv_path=args.csv,
+        data_dir=args.data_dir,
         sample_size=args.sample_size,
         include_gemini=not args.no_gemini,
         output_path=args.output,

@@ -6,8 +6,10 @@ import time
 
 import random
 import pandas as pd
+import plotly.graph_objects as go
 # pyrefly: ignore [missing-import]
 import google.generativeai as genai
+
 
 st.set_page_config(
     page_title="AI Detector & Humanizer",
@@ -126,13 +128,18 @@ def analyze_text(text):
 # ---------------------------------------------------------------------------
 # Few-Shot Humanizer – dynamically samples human-written examples each call
 # ---------------------------------------------------------------------------
-DATASET_PATH = os.path.join(os.path.dirname(__file__), "combined_dataset.csv.gz")
+from data_loader import load_and_harmonize_datasets
+from vector_store import query_human_examples
+
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 # Cache the human-only rows in memory so we don't re-read 100 MB on every click
 @st.cache_data(show_spinner=False)
 def _load_human_texts() -> list[str]:
-    """Return all human-written texts (label == 0) from the training set."""
-    df = pd.read_csv(DATASET_PATH)
+    """Return all human-written texts (label == 0) from the dataset."""
+    df = load_and_harmonize_datasets(DATA_DIR)
+    if df.empty:
+        return ["I love taking walks in the park.", "This is a great day to learn something new.", "The coffee at the local shop is amazing."]
     return df.loc[df["label"] == 0, "text"].dropna().tolist()
 
 
@@ -159,32 +166,55 @@ def get_human_examples(n: int = 3, max_chars: int = 500) -> list[str]:
     return truncated
 
 
-def humanize_text(text):
+def humanize_text(text, tone: str = "Casual / Blog"):
     if not api_key:
         return None, "Error: GEMINI_API_KEY is not set in Streamlit secrets or environment variables."
 
     try:
-        # Pull 3 fresh human-written examples for few-shot context
-        examples = get_human_examples(3)
+        # Pull 3 semantically similar human-written examples for few-shot context
+        examples = query_human_examples(text, n=3)
+        if not examples or len(examples) < 3:
+            examples = get_human_examples(3)
+            
         examples_block = "\n\n---\n\n".join(
             f"Example {i + 1}:\n{ex}" for i, ex in enumerate(examples)
         )
 
-        prompt_1 = f"""You are an expert humanizer. Study the varied sentence lengths, colloquial pacing, and natural imperfections in these three human-written examples:
+        # Tone specific instruction
+        if "Academic" in tone:
+            tone_guidance = (
+                "Maintain an Academic / Formal tone using scholarly, rigorous, and articulate language. "
+                "Ensure logical rigor and precise vocabulary while introducing human structural asymmetry."
+            )
+        elif "Professional" in tone:
+            tone_guidance = (
+                "Maintain a Professional / Corporate tone using clear, authoritative, workplace-ready phrasing "
+                "suitable for executive communications and business documentation."
+            )
+        else:
+            tone_guidance = (
+                "Maintain a Casual / Blog tone using conversational, engaging, and relatable language "
+                "with natural pacing and an organic personal perspective."
+            )
+
+        prompt_1 = f"""You are an expert humanizer. Rewrite this text to bypass AI detectors while strictly maintaining a {tone} tone.
+
+Study the varied sentence lengths, colloquial pacing, and natural imperfections in these three human-written examples:
 
 {examples_block}
 
-Now, rewrite the following predictable AI text to match the exact structural style and natural variance of those human examples.
+Now, rewrite the following predictable AI text to match the structural style and natural variance of human writing in a {tone} tone.
 Keep the original meaning and key points intact.
 Return ONLY the rewritten text, without any additional explanations or markdown formatting.
 
-You must introduce natural human variance in sentence length, structure, and vocabulary. However, under NO circumstances should you introduce grammatical errors, typos, slang, or factual inaccuracies to achieve this. The output must remain 100% grammatically correct, highly meaningful, and retain the exact original intent and professional quality of the input text.
+Tone Instruction:
+{tone_guidance}
+
+You must introduce natural human variance in sentence length, structure, and vocabulary while adhering to the target {tone} tone. Under NO circumstances should you introduce grammatical errors, typos, or factual inaccuracies to achieve this. The output must remain 100% grammatically correct, highly meaningful, and retain the original intent of the input text.
 
 Negative Constraints: You MUST absolutely avoid common AI filler words and transition tropes. DO NOT use words like: delve, tapestry, testament, beacon, furthermore, moreover, it is important to note, in conclusion, ultimately, a symphony of.
 
-Structural Asymmetry (Burstiness): Human writing is messy. Force the text to have extreme variance in sentence length. Follow a very long, complex sentence with a tiny, punchy one (e.g., 3-5 words). Use occasional rhetorical questions.
-
-Perspective: Shift the tone from 'objective observer' to a slightly more subjective, conversational voice where appropriate.
+Structural Asymmetry (Burstiness): Human writing is messy. Force the text to have extreme variance in sentence length. Follow a very long, complex sentence with a tiny, punchy one (e.g., 3-5 words).
 
 Text to rewrite:
 {text}"""
@@ -194,8 +224,8 @@ Text to rewrite:
         rewritten_text = response_1.text.strip()
         
         # Pass 2: Critique
-        prompt_2 = f"""Analyze this text for any lingering AI tropes, robotic transitions, or uniform sentence pacing. Edit it one final time to make it indistinguishable from a casual, highly educated human writer.
-        
+        prompt_2 = f"""Analyze this text for any lingering AI tropes, robotic transitions, or uniform sentence pacing. Edit it one final time to ensure it sounds like an authentic human writer maintaining a {tone} tone.
+
 Return ONLY the final edited text, without any additional explanations or markdown formatting.
 
 Text to edit:
@@ -207,6 +237,7 @@ Text to edit:
         return None, "⏱️ The humanization request timed out. The API took too long to respond. Please try again in a moment."
     except Exception as e:
         return None, f"An error occurred during humanization: {str(e)}"
+
 
 # Custom CSS for modern UI
 st.markdown("""
@@ -396,7 +427,8 @@ st.markdown("""
 # ---------------------------------------------------------------------------
 # Import the local classifier
 # ---------------------------------------------------------------------------
-from classifier import predict as classify_text, is_model_available, load_bundle
+from classifier import predict as classify_text, predict_sentences, is_model_available, load_bundle
+
 
 @st.cache_resource
 def get_model_bundle():
@@ -680,8 +712,112 @@ bg_placeholder = st.empty()
 with bg_placeholder:
     render_lexicon_swarm(app_state="idle")
 
+# --- Plotly Semi-Circular Gauge Chart Component ---
+def render_plotly_gauge(prob_pct: float, verdict: str) -> go.Figure:
+    """Render a semi-circular gauge chart displaying AI detection percentage.
+    
+    Styled to match the dark-mode aesthetic with a color gradient:
+    green (human) -> amber (ambiguous) -> red (AI).
+    """
+    if prob_pct < 35:
+        bar_color = "#34d399"  # Emerald green
+    elif prob_pct < 70:
+        bar_color = "#fbbf24"  # Amber
+    else:
+        bar_color = "#f87171"  # Rose red
+
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=prob_pct,
+        number={
+            'suffix': "%",
+            'font': {'color': '#ffffff', 'size': 46, 'family': 'Inter, sans-serif', 'weight': 800}
+        },
+        title={
+            'text': f"<b>{verdict.upper()}</b>",
+            'font': {'color': '#9ca3af', 'size': 14, 'family': 'Inter, sans-serif'}
+        },
+        gauge={
+            'axis': {
+                'range': [0, 100],
+                'tickwidth': 1,
+                'tickcolor': "#4b5563",
+                'tickfont': {'color': '#9ca3af', 'size': 11, 'family': 'Inter, sans-serif'},
+                'tickvals': [0, 25, 50, 75, 100],
+                'ticktext': ['0% (Human)', '25%', '50%', '75%', '100% (AI)']
+            },
+            'bar': {'color': bar_color, 'thickness': 0.28},
+            'bgcolor': "rgba(17, 24, 39, 0.4)",
+            'borderwidth': 0,
+            'steps': [
+                {'range': [0, 35], 'color': 'rgba(16, 185, 129, 0.15)'},   # Green (Human)
+                {'range': [35, 70], 'color': 'rgba(245, 158, 11, 0.15)'},  # Amber (Ambiguous)
+                {'range': [70, 100], 'color': 'rgba(239, 68, 68, 0.15)'}   # Red (AI)
+            ],
+            'threshold': {
+                'line': {'color': "#6366f1", 'width': 4},
+                'thickness': 0.8,
+                'value': prob_pct
+            }
+        }
+    ))
+
+    fig.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font={'color': "#f9fafb", 'family': "Inter, sans-serif"},
+        height=270,
+        margin=dict(l=30, r=30, t=45, b=10),
+    )
+    return fig
+
+
+# --- Sentence-Level Heatmap Component ---
+def render_sentence_heatmap(paragraphs: list[list[dict]]) -> str:
+    """Render HTML markup for sentence-level AI heatmap with color highlights.
+    
+    Probability Color Scale:
+      < 35%: Transparent / Faint Green tint (Human)
+      35% - 70%: Soft Semi-Transparent Amber (Moderate AI)
+      >= 70%: Soft Semi-Transparent Red (High AI)
+    """
+    html_paragraphs = []
+
+    for para_sentences in paragraphs:
+        if not para_sentences:
+            html_paragraphs.append("<div style='height: 0.75rem;'></div>")
+            continue
+
+        spans = []
+        for s in para_sentences:
+            prob_pct = s["prob_pct"]
+            text_escaped = s["text"].replace("<", "&lt;").replace(">", "&gt;")
+
+            if prob_pct < 35:
+                bg_style = "background: rgba(16, 185, 129, 0.12); border-bottom: 2px solid rgba(16, 185, 129, 0.35);"
+            elif prob_pct < 70:
+                bg_style = "background: rgba(245, 158, 11, 0.28); border-bottom: 2px solid rgba(245, 158, 11, 0.55);"
+            else:
+                bg_style = "background: rgba(239, 68, 68, 0.38); border-bottom: 2px solid rgba(239, 68, 68, 0.65);"
+
+            span_html = (
+                f'<span title="AI Probability: {prob_pct:.1f}%" style="'
+                f'{bg_style} color: #f9fafb; padding: 3px 7px; margin: 0 2px 4px 0; '
+                f'border-radius: 6px; display: inline; line-height: 1.85; '
+                f'font-size: 0.96rem; cursor: help; transition: background 0.2s ease;'
+                f'">{text_escaped}</span>'
+            )
+            spans.append(span_html)
+
+        html_paragraphs.append(f'<p style="margin-bottom: 0.85rem; line-height: 1.85;">{" ".join(spans)}</p>')
+
+    return "".join(html_paragraphs)
+
+
 # --- Three.js Score Visualizer Component ---
+
 def render_score_visualizer(score_float, prob_pct, verdict):
+
     html_code = f"""
 <!DOCTYPE html>
 <html>
@@ -871,12 +1007,30 @@ with col_left:
     if not is_valid_count:
         st.warning(f"⚠️ Minimum 600 words required for AI detection and humanization (currently {word_count} words).")
 
-    # Cohesive control buttons directly under input box
+    # Output Tone Selection
+    tone_options = ["Academic / Formal", "Casual / Blog", "Professional / Corporate"]
+    if hasattr(st, "pills"):
+        selected_tone = st.pills(
+            "Output Tone",
+            options=tone_options,
+            default="Casual / Blog",
+            key="selected_tone"
+        )
+    else:
+        selected_tone = st.selectbox(
+            "Output Tone",
+            options=tone_options,
+            index=1,
+            key="selected_tone"
+        )
+
+    # Cohesive control buttons directly under input box & tone selector
     btn_col1, btn_col2 = st.columns(2)
     with btn_col1:
         detect_button = st.button("🔍 Detect AI", disabled=not is_valid_count, use_container_width=True)
     with btn_col2:
         humanize_button = st.button("✨ Humanize Text", disabled=not is_valid_count, use_container_width=True)
+
 
 # ---------------------------------------------------------------------------
 # Detection results
@@ -900,6 +1054,7 @@ if detect_button:
             with st.spinner("Running classifier analysis…"):
                 bundle = get_model_bundle()
                 result = classify_text(text_input, bundle=bundle)
+                sentence_analysis = predict_sentences(text_input, bundle=bundle)
             # Keep ai_detected state after analysis so the background
             # visually reflects the detection result while the score is shown
             with bg_placeholder:
@@ -908,21 +1063,48 @@ if detect_button:
             prob_pct = round(result["probability"] * 100, 1)
             score_float = result["probability"]
             fp_prob = result.get("false_positive_probability")
+            moe = result.get("margin_of_error", 1.5)
             label = result["label"]
             verdict = result["verdict"]
 
-            # Render the 3D visualizer
             with col_right:
-                render_score_visualizer(score_float, prob_pct, verdict)
+                # 1. Visual Gauge Chart (Plotly semi-circular gauge)
+                fig = render_plotly_gauge(prob_pct, verdict)
+                st.plotly_chart(fig, use_container_width=True)
 
-            with col_right:
-                # ---- AI DETECTED (only when probability > 35%) ----
-                if label == 1 and result["probability"] > 0.35:
-                    fp_pct = round(fp_prob * 100, 2) if fp_prob is not None and fp_prob >= 0 else None
-    
-                    # ---- False Positive Probability ----
+                # 2. False Positive Probability Metric (st.metric) directly beneath gauge
+                fp_pct = round(fp_prob * 100, 2) if fp_prob is not None and fp_prob >= 0 else None
+
+                m_col1, m_col2 = st.columns(2)
+                with m_col1:
                     if fp_pct is not None:
-                        # Color-code: low FP = green (strong signal), high FP = amber (weak signal)
+                        st.metric(
+                            label="False Positive Probability",
+                            value=f"{fp_pct:.2f}%",
+                            delta=f"±{moe:.2f}% Margin of Error",
+                            delta_color="normal" if fp_pct <= 5 else "inverse",
+                            help="Isotonic Regression calibrated probability that human-authored text reaches or exceeds this AI detection threshold, along with the statistical margin of error."
+                        )
+                    else:
+                        st.metric(
+                            label="False Positive Probability",
+                            value="N/A",
+                            help="Isotonic Regression calibration data is unavailable."
+                        )
+
+                with m_col2:
+                    cal_prob = round(result.get("calibrated_probability", result["probability"]) * 100, 1)
+                    st.metric(
+                        label="Calibrated AI Confidence",
+                        value=f"{cal_prob}%",
+                        delta="Isotonic Regression",
+                        delta_color="off",
+                        help="Calibrated probability from Isotonic Regression fitting."
+                    )
+
+                # ---- Detailed False Positive Breakdown Card ----
+                if label == 1 and result["probability"] > 0.35:
+                    if fp_pct is not None:
                         if fp_pct <= 2:
                             fp_color = "#4ade80"  # green-400
                             fp_bg = "rgba(74, 222, 128, 0.1)"
@@ -941,44 +1123,36 @@ if detect_button:
                             fp_border = "rgba(248, 113, 113, 0.3)"
                             fp_icon = "🔴"
                             fp_note = "High false-positive risk. This could easily be a human who writes very predictably."
-    
+
                         st.markdown(f"""
                         <div style="
                             background: {fp_bg};
-                            border: 2px solid {fp_border};
+                            border: 1px solid {fp_border};
                             border-radius: 12px;
-                            padding: 1.5rem 2rem;
-                            margin: 0.75rem 0 1.5rem 0;
+                            padding: 1.25rem 1.5rem;
+                            margin: 1rem 0;
+                            backdrop-filter: blur(8px);
                         ">
-                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
-                                <span style="font-size: 1.3rem;">{fp_icon}</span>
+                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                                <span style="font-size: 1.2rem;">{fp_icon}</span>
                                 <span style="
-                                    font-size: 1rem;
+                                    font-size: 0.95rem;
                                     font-weight: 700;
                                     color: {fp_color};
                                     text-transform: uppercase;
                                     letter-spacing: 0.05em;
                                 ">
-                                    False Positive Probability
+                                    Isotonic Calibration Analysis
                                 </span>
-                            </div>
-                            <div style="
-                                font-size: 2rem;
-                                font-weight: 800;
-                                color: {fp_color};
-                                margin-bottom: 0.5rem;
-                            ">
-                                {fp_pct}%
                             </div>
                             <div style="
                                 font-size: 0.9rem;
                                 color: #d1d5db;
                                 line-height: 1.5;
                             ">
-                                There is a <strong>{fp_pct}%</strong> chance this text was actually written
-                                by a human who writes predictably. In our training dataset,
-                                <strong>{fp_pct}%</strong> of known human-written texts scored at or above
-                                {prob_pct}% AI confidence.
+                                Based on Isotonic Regression calibration across empirical human writing samples,
+                                there is a <strong>{fp_pct}%</strong> probability (<strong>±{moe:.2f}%</strong> statistical margin of error)
+                                that a human-authored text reaches or exceeds this AI detection threshold.
                             </div>
                             <div style="
                                 font-size: 0.85rem;
@@ -990,11 +1164,43 @@ if detect_button:
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
-                    else:
-                        st.info(
-                            "ℹ️ False Positive Probability is unavailable. "
-                            "Re-train the model to enable calibration data."
-                        )
+
+                # ---- Sentence-Level AI Heatmap ----
+                st.markdown("### 🔥 Sentence-Level AI Heatmap")
+                st.markdown("""
+                <div style="
+                    display: flex;
+                    align-items: center;
+                    gap: 0.75rem;
+                    margin-bottom: 0.75rem;
+                    font-size: 0.82rem;
+                    color: #9ca3af;
+                    flex-wrap: wrap;
+                ">
+                    <span><strong>Legend (hover for score):</strong></span>
+                    <span style="background: rgba(16, 185, 129, 0.15); border-bottom: 2px solid rgba(16, 185, 129, 0.4); padding: 2px 8px; border-radius: 4px; color: #34d399;">🟢 Human (&lt;35%)</span>
+                    <span style="background: rgba(245, 158, 11, 0.28); border-bottom: 2px solid rgba(245, 158, 11, 0.55); padding: 2px 8px; border-radius: 4px; color: #fbbf24;">🟡 Moderate AI (35-70%)</span>
+                    <span style="background: rgba(239, 68, 68, 0.38); border-bottom: 2px solid rgba(239, 68, 68, 0.65); padding: 2px 8px; border-radius: 4px; color: #f87171;">🔴 High AI (&ge;70%)</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+                heatmap_html = render_sentence_heatmap(sentence_analysis)
+                st.markdown(f"""
+                <div style="
+                    background: rgba(10, 12, 22, 0.75);
+                    border: 1px solid rgba(99, 102, 241, 0.25);
+                    border-radius: 12px;
+                    padding: 1.25rem 1.5rem;
+                    margin-bottom: 1.25rem;
+                    backdrop-filter: blur(8px);
+                    max-height: 420px;
+                    overflow-y: auto;
+                ">
+                    {heatmap_html}
+                </div>
+                """, unsafe_allow_html=True)
+
+
     
                 # ---- Feature breakdown (collapsible) ----
                 with st.expander("📊 Feature Breakdown"):
@@ -1061,8 +1267,10 @@ if humanize_button:
                 with bg_placeholder:
                     render_lexicon_swarm(app_state="humanized")
 
-                with st.spinner("Humanizing text… this may take a few seconds"):
-                    rewritten_text, error = humanize_text(text_input)
+                tone_val = st.session_state.get("selected_tone", "Casual / Blog")
+                with st.spinner(f"Humanizing text ({tone_val})… this may take a few seconds"):
+                    rewritten_text, error = humanize_text(text_input, tone=tone_val)
+
 
                 if rewritten_text is not None:
                     with col_right:
