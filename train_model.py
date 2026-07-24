@@ -24,6 +24,7 @@ The script:
 
 import argparse
 import sys
+import os
 import logging
 import warnings
 
@@ -32,7 +33,7 @@ import pandas as pd
 import joblib
 from tqdm import tqdm
 
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
@@ -44,7 +45,6 @@ from sklearn.metrics import (
 from sklearn.isotonic import IsotonicRegression
 
 from feature_extractor import extract_all_features
-from data_loader import load_and_harmonize_datasets
 
 
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -130,11 +130,17 @@ def train(
     """Run the full training pipeline and save the model bundle."""
 
     # ---- 1. Load data ----
-    logger.info("Loading dataset from %s ...", data_dir)
-    df = load_and_harmonize_datasets(data_dir)
+    dataset_path = os.path.join(data_dir, "unified_dataset.csv")
+    logger.info("Loading dataset from %s ...", dataset_path)
+    
+    if not os.path.exists(dataset_path):
+        logger.error(f"Unified dataset not found at {dataset_path}. Please run data_pipeline.py first.")
+        sys.exit(1)
+        
+    df = pd.read_csv(dataset_path)
 
     if df.empty:
-        logger.error("Data directory must contain datasets with 'text' and 'label' columns.")
+        logger.error("Dataset is empty.")
         sys.exit(1)
 
     df = df[["text", "label"]].dropna()
@@ -176,11 +182,11 @@ def train(
     )
     logger.info("Train: %d  |  Test: %d", len(X_train), len(X_test))
 
-    # ---- 6. Train Random Forest ----
-    model = RandomForestClassifier(
-        n_estimators=150,
+    # ---- 6. Train Logistic Regression ----
+    model = LogisticRegression(
         class_weight="balanced",
         random_state=RANDOM_STATE,
+        max_iter=1000,
         n_jobs=-1
     )
     model.fit(X_train, y_train)

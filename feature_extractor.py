@@ -52,6 +52,56 @@ LLM_TROPES = [
     "realm", "beacon", "pivotal", "multifaceted"
 ]
 
+# Common AI transition bigrams and trigrams used for n-gram density scoring.
+# These are highly predictable multi-word patterns that LLMs favour heavily.
+AI_NGRAMS = [
+    # Bigrams
+    ("it", "is"), ("this", "is"), ("as", "a"), ("in", "the"),
+    ("of", "the"), ("to", "the"), ("and", "the"), ("is", "a"),
+    ("it", "can"), ("can", "be"), ("this", "can"), ("there", "are"),
+    ("there", "is"), ("as", "well"), ("such", "as"), ("in", "order"),
+    ("is", "important"), ("it", "important"), ("in", "addition"),
+    ("as", "result"), ("this", "approach"), ("plays", "a"), ("role", "in"),
+    # Trigrams
+    ("it", "is", "important"), ("in", "order", "to"), ("as", "a", "result"),
+    ("it", "is", "essential"), ("it", "is", "worth"), ("one", "of", "the"),
+    ("in", "terms", "of"), ("it", "can", "be"), ("this", "can", "be"),
+    ("there", "are", "several"), ("it", "is", "crucial"), ("plays", "a", "crucial"),
+    ("plays", "a", "pivotal"), ("plays", "a", "vital"), ("in", "the", "realm"),
+    ("it", "is", "clear"), ("it", "is", "evident"), ("is", "important", "to"),
+    ("in", "addition", "to"), ("it", "is", "also"), ("as", "well", "as"),
+    ("it", "is", "noted"), ("not", "only", "but"), ("due", "to", "the"),
+]
+
+# ---------------------------------------------------------------------------
+# N-gram AI density helper
+# ---------------------------------------------------------------------------
+
+def compute_ngram_ai_density(words: list[str]) -> float:
+    """Compute the fraction of all bigrams+trigrams in *words* that match
+    common AI transition n-grams defined in AI_NGRAMS.
+
+    Returns a float in [0.0, 1.0].  Higher values indicate more AI-like
+    n-gram patterns.  A score above ~0.12 is considered a strong AI signal.
+    """
+    n = len(words)
+    if n < 2:
+        return 0.0
+
+    # Build a fast set of tuples for O(1) lookup
+    ai_ngram_set = set(AI_NGRAMS)
+
+    bigrams = [(words[i], words[i + 1]) for i in range(n - 1)]
+    trigrams = [(words[i], words[i + 1], words[i + 2]) for i in range(n - 2)]
+    all_ngrams = bigrams + trigrams
+
+    if not all_ngrams:
+        return 0.0
+
+    matches = sum(1 for ng in all_ngrams if ng in ai_ngram_set)
+    return float(matches / len(all_ngrams))
+
+
 # ---------------------------------------------------------------------------
 # Structural features
 # ---------------------------------------------------------------------------
@@ -64,6 +114,11 @@ def extract_structural_features(text: str) -> dict:
 
     words = word_tokenize(text.lower())
     word_count = len(words) if words else 1
+
+    # N-gram AI density (computed before alpha filter so punctuation is excluded
+    # naturally by word_tokenize, but positional context is preserved)
+    words_no_punct = [w for w in words if w.isalpha() or w.replace("'", "").isalpha()]
+    ai_ngram_density = compute_ngram_ai_density(words_no_punct)
 
     words_alpha = [w for w in words if w.isalpha()]
     word_count_alpha = len(words_alpha) if words_alpha else 1
@@ -117,7 +172,8 @@ def extract_structural_features(text: str) -> dict:
         "punctuation_ratio": float(punctuation_ratio),
         "flesch_kincaid_grade": float(flesch_kincaid),
         "paragraph_symmetry": float(paragraph_symmetry),
-        "trope_count": float(trope_count)
+        "trope_count": float(trope_count),
+        "ai_ngram_density": float(ai_ngram_density),
     }
 
 

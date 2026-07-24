@@ -3,7 +3,7 @@ import random
 import logging
 import chromadb
 from chromadb.config import Settings
-from data_loader import load_and_harmonize_datasets
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +28,14 @@ def build_vector_index(data_dir: str = DATA_DIR, max_texts: int = 2500):
         
     collection = client.create_collection(name=COLLECTION_NAME)
     
-    logger.info(f"Loading data from {data_dir} to build vector index...")
-    df = load_and_harmonize_datasets(data_dir)
+    dataset_path = os.path.join(data_dir, "unified_dataset.csv")
+    logger.info(f"Loading data from {dataset_path} to build vector index...")
+    
+    if not os.path.exists(dataset_path):
+        logger.error(f"Unified dataset not found at {dataset_path}.")
+        return
+        
+    df = pd.read_csv(dataset_path)
     if df.empty:
         logger.warning("No data found to build index.")
         return

@@ -6,4 +6,10 @@ __pycache__/
 dataset.csv
 combined_dataset.csv
 AIvsHuman/
+AIvsHuman1/
 AIvsHuman2/
+AIvsHuman3/
+AIvsHuman4/
+AIvsHuman5/
+data/unified_dataset.csv
+chroma_db/
