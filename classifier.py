@@ -106,7 +106,7 @@ def compute_margin_of_error(fp_prob: float, bundle: dict, confidence_level: floa
 # Prediction
 # ---------------------------------------------------------------------------
 
-def predict(text: str, model_path: str = DEFAULT_MODEL_PATH, bundle: dict | None = None, custom_threshold: float = 0.35) -> dict:
+def predict(text: str, model_path: str = DEFAULT_MODEL_PATH, bundle: dict | None = None, custom_threshold: float = 0.15) -> dict:
     """Classify *text* as human (0) or AI-generated (1).
 
     Returns
@@ -166,9 +166,9 @@ def predict(text: str, model_path: str = DEFAULT_MODEL_PATH, bundle: dict | None
     # Human-readable verdict
     if prob_ai >= 0.80:
         verdict = "Very likely AI-Generated"
-    elif prob_ai >= threshold:
+    elif prob_ai >= 0.50:
         verdict = "Likely AI-Generated"
-    elif prob_ai >= 0.40:
+    elif prob_ai >= threshold:
         verdict = "Possibly AI-Generated"
     else:
         verdict = "Human Written"
@@ -206,7 +206,7 @@ def predict_sentences(text: str, model_path: str = DEFAULT_MODEL_PATH, bundle: d
     scaler = bundle["scaler"]
     imputer = bundle["imputer"]
     feature_names = bundle["feature_names"]
-    threshold = bundle.get("threshold", 0.35)
+    threshold = 0.15  # Strict threshold — matches predict() aggressive default
 
     paragraphs_raw = text.split("\n")
     paragraphs_result = []

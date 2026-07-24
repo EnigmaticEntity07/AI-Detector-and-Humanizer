@@ -513,6 +513,11 @@ st.markdown("""
     }
     .stApp, .stApp > div, [data-testid="stAppViewContainer"] {
         background: transparent !important;
+        overflow-y: auto !important;
+    }
+    [data-testid="stMain"], .main .block-container {
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
     }
     header[data-testid="stHeader"] {
         background: transparent !important;
@@ -1243,56 +1248,57 @@ if "input_text" not in st.session_state:
 col_left, col_right = st.columns(2, gap="large")
 
 with col_left:
-    # Input section
-    text_input = st.text_area(
-        "Paste your content here:",
-        height=400,
-        placeholder="Enter the text you want to analyze or humanize...",
-        label_visibility="collapsed",
-        key="input_text"
-    )
+    with st.container(height=600):
+        # Input section
+        text_input = st.text_area(
+            "Paste your content here:",
+            height=400,
+            placeholder="Enter the text you want to analyze or humanize...",
+            label_visibility="collapsed",
+            key="input_text"
+        )
 
-    # Dynamic Word Count Indicator
-    raw_text = text_input.strip()
-    words = raw_text.split() if raw_text else []
-    word_count = len(words)
-    is_valid_count = word_count >= 600
+        # Dynamic Word Count Indicator
+        raw_text = text_input.strip()
+        words = raw_text.split() if raw_text else []
+        word_count = len(words)
+        is_valid_count = word_count >= 600
 
-    badge_class = "word-counter-valid" if is_valid_count else "word-counter-invalid"
-    st.markdown(f"""
-    <div class="word-counter-wrapper">
-        <div class="word-counter-badge {badge_class}">
-            Word Count: <strong>{word_count}</strong> / 600 Min.
+        badge_class = "word-counter-valid" if is_valid_count else "word-counter-invalid"
+        st.markdown(f"""
+        <div class="word-counter-wrapper">
+            <div class="word-counter-badge {badge_class}">
+                Word Count: <strong>{word_count}</strong> / 600 Min.
+            </div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
-    if not is_valid_count:
-        st.warning(f"⚠️ Minimum 600 words required for AI detection and humanization (currently {word_count} words).")
+        if not is_valid_count:
+            st.warning(f"⚠️ Minimum 600 words required for AI detection and humanization (currently {word_count} words).")
 
-    # Output Tone Selection
-    tone_options = ["Academic / Formal", "Casual / Blog", "Professional / Corporate"]
-    if hasattr(st, "pills"):
-        selected_tone = st.pills(
-            "Output Tone",
-            options=tone_options,
-            default="Casual / Blog",
-            key="selected_tone"
-        )
-    else:
-        selected_tone = st.selectbox(
-            "Output Tone",
-            options=tone_options,
-            index=1,
-            key="selected_tone"
-        )
+        # Output Tone Selection
+        tone_options = ["Academic / Formal", "Casual / Blog", "Professional / Corporate"]
+        if hasattr(st, "pills"):
+            selected_tone = st.pills(
+                "Output Tone",
+                options=tone_options,
+                default="Casual / Blog",
+                key="selected_tone"
+            )
+        else:
+            selected_tone = st.selectbox(
+                "Output Tone",
+                options=tone_options,
+                index=1,
+                key="selected_tone"
+            )
 
-    # Cohesive control buttons directly under input box & tone selector
-    btn_col1, btn_col2 = st.columns(2)
-    with btn_col1:
-        detect_button = st.button("🔍 Detect AI", disabled=not is_valid_count, use_container_width=True)
-    with btn_col2:
-        humanize_button = st.button("✨ Humanize Text", disabled=not is_valid_count, use_container_width=True)
+        # Cohesive control buttons directly under input box & tone selector
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            detect_button = st.button("🔍 Detect AI", disabled=not is_valid_count, use_container_width=True)
+        with btn_col2:
+            humanize_button = st.button("✨ Humanize Text", disabled=not is_valid_count, use_container_width=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1324,174 +1330,46 @@ if detect_button:
                 render_lexicon_swarm(app_state="ai_detected")
 
             prob_pct = round(result["probability"] * 100, 1)
-            score_float = result["probability"]
-            fp_prob = result.get("false_positive_probability")
-            moe = result.get("margin_of_error", 1.5)
-            label = result["label"]
             verdict = result["verdict"]
 
             with col_right:
-                # 1. Visual Gauge Chart (Plotly semi-circular gauge)
-                fig = render_plotly_gauge(prob_pct, verdict)
-                st.plotly_chart(fig, use_container_width=True)
+                with st.container(height=600):
+                    # 1. Visual Gauge Chart (Plotly semi-circular gauge)
+                    fig = render_plotly_gauge(prob_pct, verdict)
+                    st.plotly_chart(fig, use_container_width=True)
 
-                # 2. False Positive Probability Metric (st.metric) directly beneath gauge
-                fp_pct = round(fp_prob * 100, 2) if fp_prob is not None and fp_prob >= 0 else None
+                    # 2. Sentence-Level AI Heatmap
+                    st.markdown("### 🔥 Sentence-Level AI Heatmap")
+                    st.markdown("""
+                    <div style="
+                        display: flex;
+                        align-items: center;
+                        gap: 0.75rem;
+                        margin-bottom: 0.75rem;
+                        font-size: 0.82rem;
+                        color: #9ca3af;
+                        flex-wrap: wrap;
+                    ">
+                        <span><strong>Legend (hover for score):</strong></span>
+                        <span style="background: rgba(16, 185, 129, 0.15); border-bottom: 2px solid rgba(16, 185, 129, 0.4); padding: 2px 8px; border-radius: 4px; color: #34d399;">🟢 Human (&lt;35%)</span>
+                        <span style="background: rgba(245, 158, 11, 0.28); border-bottom: 2px solid rgba(245, 158, 11, 0.55); padding: 2px 8px; border-radius: 4px; color: #fbbf24;">🟡 Moderate AI (35-70%)</span>
+                        <span style="background: rgba(239, 68, 68, 0.38); border-bottom: 2px solid rgba(239, 68, 68, 0.65); padding: 2px 8px; border-radius: 4px; color: #f87171;">🔴 High AI (&ge;70%)</span>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-                m_col1, m_col2 = st.columns(2)
-                with m_col1:
-                    if fp_pct is not None:
-                        st.metric(
-                            label="False Positive Probability",
-                            value=f"{fp_pct:.2f}%",
-                            delta=f"±{moe:.2f}% Margin of Error",
-                            delta_color="normal" if fp_pct <= 5 else "inverse",
-                            help="Isotonic Regression calibrated probability that human-authored text reaches or exceeds this AI detection threshold, along with the statistical margin of error."
-                        )
-                    else:
-                        st.metric(
-                            label="False Positive Probability",
-                            value="N/A",
-                            help="Isotonic Regression calibration data is unavailable."
-                        )
-
-                with m_col2:
-                    cal_prob = round(result.get("calibrated_probability", result["probability"]) * 100, 1)
-                    st.metric(
-                        label="Calibrated AI Confidence",
-                        value=f"{cal_prob}%",
-                        delta="Isotonic Regression",
-                        delta_color="off",
-                        help="Calibrated probability from Isotonic Regression fitting."
-                    )
-
-                # ---- Detailed False Positive Breakdown Card ----
-                if label == 1 and result["probability"] > 0.35:
-                    if fp_pct is not None:
-                        if fp_pct <= 2:
-                            fp_color = "#4ade80"  # green-400
-                            fp_bg = "rgba(74, 222, 128, 0.1)"
-                            fp_border = "rgba(74, 222, 128, 0.3)"
-                            fp_icon = "✅"
-                            fp_note = "Very low false-positive risk. The AI signal is strong."
-                        elif fp_pct <= 10:
-                            fp_color = "#fbbf24"  # amber-400
-                            fp_bg = "rgba(251, 191, 36, 0.1)"
-                            fp_border = "rgba(251, 191, 36, 0.3)"
-                            fp_icon = "⚠️"
-                            fp_note = "Moderate false-positive risk. Consider reviewing manually."
-                        else:
-                            fp_color = "#f87171"  # red-400
-                            fp_bg = "rgba(248, 113, 113, 0.1)"
-                            fp_border = "rgba(248, 113, 113, 0.3)"
-                            fp_icon = "🔴"
-                            fp_note = "High false-positive risk. This could easily be a human who writes very predictably."
-
-                        st.markdown(f"""
-                        <div style="
-                            background: {fp_bg};
-                            border: 1px solid {fp_border};
-                            border-radius: 12px;
-                            padding: 1.25rem 1.5rem;
-                            margin: 1rem 0;
-                            backdrop-filter: blur(8px);
-                        ">
-                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
-                                <span style="font-size: 1.2rem;">{fp_icon}</span>
-                                <span style="
-                                    font-size: 0.95rem;
-                                    font-weight: 700;
-                                    color: {fp_color};
-                                    text-transform: uppercase;
-                                    letter-spacing: 0.05em;
-                                ">
-                                    Isotonic Calibration Analysis
-                                </span>
-                            </div>
-                            <div style="
-                                font-size: 0.9rem;
-                                color: #d1d5db;
-                                line-height: 1.5;
-                            ">
-                                Based on Isotonic Regression calibration across empirical human writing samples,
-                                there is a <strong>{fp_pct}%</strong> probability (<strong>±{moe:.2f}%</strong> statistical margin of error)
-                                that a human-authored text reaches or exceeds this AI detection threshold.
-                            </div>
-                            <div style="
-                                font-size: 0.85rem;
-                                color: #9ca3af;
-                                margin-top: 0.5rem;
-                                font-style: italic;
-                            ">
-                                {fp_note}
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-
-                # ---- Sentence-Level AI Heatmap ----
-                st.markdown("### 🔥 Sentence-Level AI Heatmap")
-                st.markdown("""
-                <div style="
-                    display: flex;
-                    align-items: center;
-                    gap: 0.75rem;
-                    margin-bottom: 0.75rem;
-                    font-size: 0.82rem;
-                    color: #9ca3af;
-                    flex-wrap: wrap;
-                ">
-                    <span><strong>Legend (hover for score):</strong></span>
-                    <span style="background: rgba(16, 185, 129, 0.15); border-bottom: 2px solid rgba(16, 185, 129, 0.4); padding: 2px 8px; border-radius: 4px; color: #34d399;">🟢 Human (&lt;35%)</span>
-                    <span style="background: rgba(245, 158, 11, 0.28); border-bottom: 2px solid rgba(245, 158, 11, 0.55); padding: 2px 8px; border-radius: 4px; color: #fbbf24;">🟡 Moderate AI (35-70%)</span>
-                    <span style="background: rgba(239, 68, 68, 0.38); border-bottom: 2px solid rgba(239, 68, 68, 0.65); padding: 2px 8px; border-radius: 4px; color: #f87171;">🔴 High AI (&ge;70%)</span>
-                </div>
-                """, unsafe_allow_html=True)
-
-                heatmap_html = render_sentence_heatmap(sentence_analysis)
-                st.markdown(f"""
-                <div style="
-                    background: rgba(10, 12, 22, 0.75);
-                    border: 1px solid rgba(99, 102, 241, 0.25);
-                    border-radius: 12px;
-                    padding: 1.25rem 1.5rem;
-                    margin-bottom: 1.25rem;
-                    backdrop-filter: blur(8px);
-                    max-height: 420px;
-                    overflow-y: auto;
-                ">
-                    {heatmap_html}
-                </div>
-                """, unsafe_allow_html=True)
-
-
-    
-                # ---- Feature breakdown (collapsible) ----
-                with st.expander("📊 Feature Breakdown"):
-                    features = result["features"]
-                    feat_cols = st.columns(3)
-                    nice_names = {
-                        "avg_sentence_length": ("📏 Avg Sentence Length", "words"),
-                        "sentence_length_std": ("📐 Sentence Burstiness (StdDev)", ""),
-                        "vocab_richness": ("📖 Vocabulary Richness (TTR)", ""),
-                        "stopword_freq": ("🔤 Stop-word Frequency", ""),
-                        "sentence_count": ("📝 Sentence Count", ""),
-                        "avg_word_length": ("🔡 Avg Word Length", "chars"),
-                        "punctuation_ratio": ("✏️ Punctuation Ratio", ""),
-                        "flesch_kincaid_grade": ("🎓 Flesch-Kincaid Grade", ""),
-                        "paragraph_symmetry": ("⚖️ Paragraph Symmetry", ""),
-                        "trope_count": ("🤖 LLM Trope Count", "phrases"),
-                        "gemini_predictability": ("🧠 Gemini Predictability", "/1.0"),
-                        "gemini_trope_presence": ("🧠 Gemini Trope Score", "/1.0"),
-                    }
-                    for idx, (key, (label, unit)) in enumerate(nice_names.items()):
-                        val = features.get(key)
-                        if val is None:
-                            display_val = "N/A"
-                        elif isinstance(val, float) and val < 1:
-                            display_val = f"{val:.3f}{unit}"
-                        else:
-                            display_val = f"{val:.1f}{unit}" if isinstance(val, float) else f"{val}{unit}"
-                        feat_cols[idx % 3].metric(label, display_val)
+                    heatmap_html = render_sentence_heatmap(sentence_analysis)
+                    st.markdown(f"""
+                    <div style="
+                        background: rgba(10, 12, 22, 0.75);
+                        border: 1px solid rgba(99, 102, 241, 0.25);
+                        border-radius: 12px;
+                        padding: 1.25rem 1.5rem;
+                        margin-bottom: 1.25rem;
+                        backdrop-filter: blur(8px);
+                    ">
+                        {heatmap_html}
+                    </div>
+                    """, unsafe_allow_html=True)
 
     else:
         with col_left:
@@ -1515,14 +1393,14 @@ if humanize_button:
                     bundle = get_model_bundle()
                     pre_check = classify_text(text_input, bundle=bundle)
                 pre_prob = pre_check["probability"]
-                if pre_prob <= 0.35:
+                if pre_prob <= 0.15:
                     skip_humanize = True
                     with col_right:
                         st.info(
                             "🟢 **This text already reads as human-written. "
                             "No humanization required.**\n\n"
                             f"AI probability is only **{round(pre_prob * 100, 1)}%** "
-                            "(below the 40% threshold)."
+                            "(below the 15% threshold)."
                         )
 
             if not skip_humanize:
@@ -1531,29 +1409,14 @@ if humanize_button:
                     render_lexicon_swarm(app_state="humanized")
 
                 tone_val = st.session_state.get("selected_tone", "Casual / Blog")
-                status_widget = st.status("Humanizing and verifying text...", expanded=True)
-                with status_widget:
+                with st.spinner("Humanizing text…"):
                     result = validate_and_humanize(
                         text_input,
                         tone=tone_val,
                         max_retries=3,
-                        status_container=status_widget,
+                        status_container=None,
                         bundle=bundle,
                     )
-
-                # Update status widget final state
-                if result["passed_all"]:
-                    status_widget.update(
-                        label=f"✅ Humanization complete — all checks passed (Attempt {result['attempts']})",
-                        state="complete",
-                    )
-                elif result["text"]:
-                    status_widget.update(
-                        label=f"⚠️ Completed after {result['attempts']} attempts (Best Score: {result['final_score']:.1f}%)",
-                        state="complete",
-                    )
-                else:
-                    status_widget.update(label="❌ Humanization failed", state="error")
 
                 rewritten_text = result["text"]
                 error = result["error"]
@@ -1563,95 +1426,27 @@ if humanize_button:
                         st.error(error)
                 if rewritten_text is not None:
                     with col_right:
-                        st.subheader("✨ Humanized Text")
+                        with st.container(height=600):
+                            st.subheader("✨ Humanized Text")
 
-                        # ── Confirmation Badge ────────────────────────────────
-                        wc_diff = result["word_count_diff"]
-                        wc_sign = "+" if wc_diff >= 0 else ""
-                        score_val = result["final_score"]
-                        passed = result["passed_all"]
-                        bl_clean = result["blacklist_clean"]
-
-                        # Color coding
-                        badge_bg = "rgba(16, 185, 129, 0.12)" if passed else "rgba(245, 158, 11, 0.12)"
-                        badge_border = "rgba(16, 185, 129, 0.4)" if passed else "rgba(245, 158, 11, 0.4)"
-                        badge_icon = "✅" if passed else "⚠️"
-                        badge_label = "ALL CHECKS PASSED" if passed else "BEST EFFORT (not all checks passed)"
-
-                        wc_color = "#34d399" if wc_diff >= -100 else "#f87171"
-                        score_color = "#34d399" if score_val <= 20 else ("#fbbf24" if score_val <= 40 else "#f87171")
-                        bl_color = "#34d399" if bl_clean else "#f87171"
-
-                        st.markdown(f"""
-                        <div style="
-                            background: {badge_bg};
-                            border: 1px solid {badge_border};
-                            border-radius: 12px;
-                            padding: 1rem 1.25rem;
-                            margin-bottom: 1rem;
-                            backdrop-filter: blur(8px);
-                        ">
-                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem;">
-                                <span style="font-size: 1.1rem;">{badge_icon}</span>
-                                <span style="
-                                    font-size: 0.85rem;
-                                    font-weight: 700;
-                                    color: {'#34d399' if passed else '#fbbf24'};
-                                    text-transform: uppercase;
-                                    letter-spacing: 0.05em;
-                                ">{badge_label}</span>
-                                <span style="
-                                    font-size: 0.78rem;
-                                    color: #9ca3af;
-                                    margin-left: auto;
-                                ">Attempts: {result['attempts']}</span>
-                            </div>
-                            <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; font-size: 0.88rem;">
-                                <div>
-                                    <span style="color: #9ca3af;">Word Count Δ: </span>
-                                    <strong style="color: {wc_color};">{wc_sign}{wc_diff} words</strong>
-                                </div>
-                                <div>
-                                    <span style="color: #9ca3af;">AI Score: </span>
-                                    <strong style="color: {score_color};">{score_val:.1f}%</strong>
-                                </div>
-                                <div>
-                                    <span style="color: #9ca3af;">Blacklist: </span>
-                                    <strong style="color: {bl_color};">{'Clean ✓' if bl_clean else 'Violations ✗'}</strong>
-                                </div>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-
-                        # Styled output container
-                        st.markdown(f"""
-                        <div style="
-                            background: rgba(2, 44, 34, 0.6);
-                            backdrop-filter: blur(12px);
-                            -webkit-backdrop-filter: blur(12px);
-                            border: 1px solid rgba(16, 185, 129, 0.3);
-                            border-radius: 16px;
-                            padding: 2rem 2.5rem;
-                            margin: 1rem 0;
-                            font-size: 1.05rem;
-                            line-height: 1.8;
-                            color: #ecfdf5;
-                            box-shadow: 0 4px 24px rgba(16, 185, 129, 0.15);
-                            white-space: pre-wrap;
-                            word-wrap: break-word;
-                            height: 400px;
-                            overflow-y: auto;
-                        ">{rewritten_text}</div>
-                        """, unsafe_allow_html=True)
-
-                        # Copy-friendly fallback in a collapsed expander
-                        with st.expander("📋 Copy-friendly plain text"):
-                            st.text_area(
-                                "Humanized output",
-                                value=rewritten_text,
-                                height=250,
-                                label_visibility="collapsed",
-                            )
+                            # Styled output container — clean final text only
+                            st.markdown(f"""
+                            <div style="
+                                background: rgba(2, 44, 34, 0.6);
+                                backdrop-filter: blur(12px);
+                                -webkit-backdrop-filter: blur(12px);
+                                border: 1px solid rgba(16, 185, 129, 0.3);
+                                border-radius: 16px;
+                                padding: 2rem 2.5rem;
+                                margin: 1rem 0;
+                                font-size: 1.05rem;
+                                line-height: 1.8;
+                                color: #ecfdf5;
+                                box-shadow: 0 4px 24px rgba(16, 185, 129, 0.15);
+                                white-space: pre-wrap;
+                                word-wrap: break-word;
+                            ">{rewritten_text}</div>
+                            """, unsafe_allow_html=True)
                 else:
                     with col_right:
                         st.error(f"❌ **Humanization failed.** {error}")
