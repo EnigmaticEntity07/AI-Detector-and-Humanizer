@@ -181,11 +181,84 @@ def extract_structural_features(text: str) -> dict:
 # Gemini predictability score
 # ---------------------------------------------------------------------------
 
+def parse_gemini_response(result_text: str) -> tuple[float | None, float | None]:
+    """Parse Gemini output using JSON and robust regex fallbacks.
+
+    Handles natural language text like 'I am 99% confident this is AI', markdown
+    wrappers, raw percentages, and JSON objects.
+    Returns (structural_predictability, trope_presence) scaled to [0.0, 1.0] or None.
+    """
+    pred, trope = None, None
+    if not result_text:
+        return None, None
+
+    clean_text = result_text.strip()
+    if clean_text.startswith("```json"):
+        clean_text = clean_text[7:]
+    elif clean_text.startswith("```"):
+        clean_text = clean_text[3:]
+    if clean_text.endswith("```"):
+        clean_text = clean_text[:-3]
+    clean_text = clean_text.strip()
+
+    # Step 1: Try JSON parsing
+    try:
+        data = json.loads(clean_text)
+        if isinstance(data, dict):
+            p_val = data.get("structural_predictability") or data.get("score") or data.get("predictability")
+            t_val = data.get("trope_presence") or data.get("tropes")
+            if p_val is not None:
+                p_float = float(str(p_val).replace('%', '').strip())
+                pred = p_float / 100.0 if p_float > 1.0 else p_float
+            if t_val is not None:
+                t_float = float(str(t_val).replace('%', '').strip())
+                trope = t_float / 100.0 if t_float > 1.0 else t_float
+    except Exception:
+        pass
+
+    # Step 2: Regex fallbacks if JSON parsing did not extract values
+    if pred is None:
+        m_pred = re.search(
+            r'(?:structural_predictability|predictability|confidence|score)\s*["\']?\s*[:=]\s*["\']?([0-1]\.\d+|\d{1,3}(?:\.\d+)?)\s*%?',
+            result_text,
+            re.IGNORECASE,
+        )
+        if m_pred:
+            val = float(m_pred.group(1))
+            pred = val / 100.0 if val > 1.0 else val
+        else:
+            m_pct = re.search(r'(\d{1,3}(?:\.\d+)?)\s*%\s*(?:confident|confidence|ai|generated|predictable)', result_text, re.IGNORECASE)
+            if not m_pct:
+                m_pct = re.search(r'(?:confident|confidence|ai|generated|predictable)[^\d]*(\d{1,3}(?:\.\d+)?)\s*%', result_text, re.IGNORECASE)
+            if not m_pct:
+                m_pct = re.search(r'(\d{1,3}(?:\.\d+)?)\s*%', result_text)
+            if m_pct:
+                val = float(m_pct.group(1))
+                pred = val / 100.0 if val > 1.0 else val
+
+    if trope is None:
+        m_trope = re.search(
+            r'(?:trope_presence|tropes?)\s*["\']?\s*[:=]\s*["\']?([0-1]\.\d+|\d{1,3}(?:\.\d+)?)\s*%?',
+            result_text,
+            re.IGNORECASE,
+        )
+        if m_trope:
+            val = float(m_trope.group(1))
+            trope = val / 100.0 if val > 1.0 else val
+
+    if pred is not None:
+        pred = float(np.clip(pred, 0.0, 1.0))
+    if trope is not None:
+        trope = float(np.clip(trope, 0.0, 1.0))
+
+    return pred, trope
+
+
 def get_gemini_features(text: str, _call_gemini=None) -> dict:
     """Ask Gemini to rate the text for LLM tropes and structural predictability.
 
-    Returns a dict with `gemini_predictability` and `gemini_trope_presence`
-    (both scaled 0.0 - 1.0). Returns None values if the call fails.
+    Returns a dict with `gemini_predictability`, `gemini_trope_presence`, and
+    `raw_gemini_response`.
     """
     snippet = text[:3000]
 
@@ -199,8 +272,12 @@ def get_gemini_features(text: str, _call_gemini=None) -> dict:
         f"Text:\n{snippet}"
     )
 
-    result = {"gemini_predictability": None, "gemini_trope_presence": None}
-    
+    result = {
+        "gemini_predictability": None,
+        "gemini_trope_presence": None,
+        "raw_gemini_response": None,
+    }
+
     try:
         if _call_gemini is None:
             from app import call_gemini  # lazy import
@@ -208,27 +285,23 @@ def get_gemini_features(text: str, _call_gemini=None) -> dict:
             call_gemini = _call_gemini
 
         response = call_gemini(prompt)
-        result_text = response.text.strip()
+        result_text = getattr(response, "text", str(response)).strip()
+        result["raw_gemini_response"] = result_text
 
-        if result_text.startswith("```json"):
-            result_text = result_text[7:]
-        elif result_text.startswith("```"):
-            result_text = result_text[3:]
-        if result_text.endswith("```"):
-            result_text = result_text[:-3]
+        logger.info("PIPELINE [Gemini API Response]: %s", result_text)
 
-        data = json.loads(result_text.strip())
-        
-        pred = data.get("structural_predictability")
-        trope = data.get("trope_presence")
-        
-        if pred is not None and 0 <= float(pred) <= 1.0:
-            result["gemini_predictability"] = float(pred)
-        if trope is not None and 0 <= float(trope) <= 1.0:
-            result["gemini_trope_presence"] = float(trope)
-            
+        pred, trope = parse_gemini_response(result_text)
+        result["gemini_predictability"] = pred
+        result["gemini_trope_presence"] = trope
+
+        logger.info(
+            "PIPELINE [Parsed Gemini Features]: predictability=%s, trope_presence=%s",
+            pred,
+            trope,
+        )
+
     except Exception as exc:
-        logger.debug("Gemini predictability call failed: %s", exc)
+        logger.info("PIPELINE [Gemini API Call Failed]: %s", exc)
 
     return result
 

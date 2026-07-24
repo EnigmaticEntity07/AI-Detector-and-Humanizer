@@ -1398,6 +1398,25 @@ if detect_button:
                     </div>
                     """, unsafe_allow_html=True)
 
+                    # 3. Temporary Debug Stats UI Expander
+                    debug_stats = result.get("debug_stats", {})
+                    if debug_stats:
+                        with st.expander("🛠️ Debug Stats (Unscaled Metrics)", expanded=False):
+                            st.write(f"**Text Length:** {debug_stats.get('text_words', 0)} words ({debug_stats.get('text_chars', 0)} chars)")
+                            st.write(f"**Unscaled Model Score P(AI):** `{debug_stats.get('unscaled_model_probability', 0.0):.4f}`")
+                            st.write(f"**Calibrated Score:** `{debug_stats.get('calibrated_probability', 0.0):.4f}`")
+                            st.write(f"**Hard Override Triggered:** `{debug_stats.get('override_triggered', False)}`")
+                            if debug_stats.get("override_reasons"):
+                                st.write(f"**Override Reasons:** {', '.join(debug_stats.get('override_reasons', []))}")
+                            st.write(f"**Final Display Probability:** `{debug_stats.get('final_probability', 0.0) * 100:.1f}%`")
+                            st.markdown("---")
+                            st.write(f"**Burstiness (std):** `{debug_stats.get('burstiness_std', 0.0)}`")
+                            st.write(f"**AI N-gram Density:** `{debug_stats.get('ai_ngram_density', 0.0)}`")
+                            st.write(f"**Trope Count:** `{debug_stats.get('trope_count', 0)}`")
+                            st.write(f"**Gemini Predictability Score:** `{debug_stats.get('gemini_predictability')}`")
+                            st.write(f"**Gemini Trope Score:** `{debug_stats.get('gemini_trope_presence')}`")
+                            st.text_area("Gemini API Raw Output String", value=str(debug_stats.get("raw_gemini_response", "N/A")), height=100, disabled=True)
+
     else:
         with col_left:
             st.warning("Please enter some text to analyze.")
